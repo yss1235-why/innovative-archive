@@ -13,8 +13,31 @@ import { generateReferralCode, getUserIdByReferralCode } from "./referral";
 
 const googleProvider = new GoogleAuthProvider();
 
-// Admin email - hardcoded for security
-const ADMIN_EMAIL = "yursccc@gmail.com";
+// Admin email - fallback for initial setup
+const DEFAULT_ADMIN_EMAIL = "yursccc@gmail.com";
+
+// Check if an email is an admin (checks settings first, then fallback)
+async function checkIsAdminEmail(email: string | null): Promise<boolean> {
+    if (!email) return false;
+
+    // Always allow the default admin
+    if (email === DEFAULT_ADMIN_EMAIL) return true;
+
+    // Check settings for additional admin emails
+    try {
+        const settingsDoc = await getDoc(doc(db, "settings", "app"));
+        if (settingsDoc.exists()) {
+            const adminEmails = settingsDoc.data().adminEmails || [];
+            if (Array.isArray(adminEmails) && adminEmails.includes(email)) {
+                return true;
+            }
+        }
+    } catch (error) {
+        console.error("Error checking admin emails:", error);
+    }
+
+    return false;
+}
 
 // Sign in with Google
 export async function signInWithGoogle(referralCode?: string) {
@@ -37,6 +60,9 @@ export async function signInWithGoogle(referralCode?: string) {
                 }
             }
 
+            // Check if user should be admin
+            const isAdminUser = await checkIsAdminEmail(user.email);
+
             // New user - create profile
             await setDoc(userRef, {
                 uid: user.uid,
@@ -44,7 +70,7 @@ export async function signInWithGoogle(referralCode?: string) {
                 displayName: user.displayName,
                 photoURL: user.photoURL,
                 phone: "",
-                role: user.email === ADMIN_EMAIL ? "admin" : "user",
+                role: isAdminUser ? "admin" : "user",
                 referralCode: generateReferralCode(),
                 referredBy: validReferrerId,
                 createdAt: serverTimestamp(),

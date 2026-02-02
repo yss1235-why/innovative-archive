@@ -11,6 +11,7 @@ import {
 } from "firebase/firestore";
 import { uploadToCloudinary } from "@/lib/cloudinary";
 import { db } from "@/lib/firebase";
+import { updateOrderStatus as processOrderStatus } from "@/lib/orders";
 import {
     Package, ShoppingBag, Users, Settings, Loader2,
     Check, X, Trash2, Plus, Upload, Save, Phone, Image,
@@ -25,7 +26,7 @@ interface Order {
     userEmail?: string;
     items: { name: string; price: number; quantity: number }[];
     total: number;
-    status: "pending" | "processing" | "delivered";
+    status: "pending" | "processing" | "shipped" | "completed" | "cancelled";
     createdAt: { seconds: number };
     userPhone?: string;
 }
@@ -267,10 +268,17 @@ export default function AdminPage() {
 
     const updateOrderStatus = async (orderId: string, status: Order["status"]) => {
         try {
-            await updateDoc(doc(db, "orders", orderId), { status });
+            // Use the orders utility which handles commission processing on completion
+            await processOrderStatus(orderId, status);
             setOrders(orders.map(o => o.id === orderId ? { ...o, status } : o));
+
+            // Refresh referrals if order was completed (new commission may have been created)
+            if (status === "completed") {
+                loadOtherData();
+            }
         } catch (error) {
             console.error("Error updating order:", error);
+            alert("Failed to update order status. Please try again.");
         }
     };
 
@@ -458,7 +466,7 @@ export default function AdminPage() {
     if (!user || !isAdmin) return null;
 
     const tabs = [
-        { id: "orders", label: "Orders", icon: Package, count: orders.filter(o => o.status !== "delivered").length },
+        { id: "orders", label: "Orders", icon: Package, count: orders.filter(o => o.status !== "completed" && o.status !== "cancelled").length },
         { id: "products", label: "Products", icon: ShoppingBag, count: products.length },
         { id: "referrals", label: "Referrals", icon: Users, count: referrals.filter(r => r.status === "pending").length },
         { id: "withdrawals", label: "Withdrawals", icon: Banknote, count: withdrawals.filter(w => w.status === "pending").length },
@@ -534,7 +542,9 @@ export default function AdminPage() {
                                                     >
                                                         <option value="pending" className="bg-stone-900">Pending</option>
                                                         <option value="processing" className="bg-stone-900">Processing</option>
-                                                        <option value="delivered" className="bg-stone-900">Delivered</option>
+                                                        <option value="shipped" className="bg-stone-900">Shipped</option>
+                                                        <option value="completed" className="bg-stone-900">Completed</option>
+                                                        <option value="cancelled" className="bg-stone-900">Cancelled</option>
                                                     </select>
                                                 </div>
 
