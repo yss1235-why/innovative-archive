@@ -7,7 +7,7 @@ import { Navbar } from "@/components/ui/Navbar";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useAuth } from "@/lib/AuthContext";
 import { useCart } from "@/lib/CartContext";
-import { collection, query, where, getDocs, doc, updateDoc, onSnapshot } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, updateDoc, onSnapshot, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { getWalletData, formatCurrency } from "@/lib/wallet";
 import {
@@ -63,6 +63,22 @@ function DashboardContent() {
     const [saving, setSaving] = useState(false);
     const [dataLoading, setDataLoading] = useState(true);
     const [refreshingReferrals, setRefreshingReferrals] = useState(false);
+    const [whatsappNumber, setWhatsappNumber] = useState<string>("");
+
+    // Fetch WhatsApp number from settings
+    useEffect(() => {
+        const fetchWhatsApp = async () => {
+            try {
+                const settingsDoc = await getDoc(doc(db, "settings", "app"));
+                if (settingsDoc.exists()) {
+                    setWhatsappNumber(settingsDoc.data().whatsappNumber || "");
+                }
+            } catch (error) {
+                console.error("Error fetching WhatsApp number:", error);
+            }
+        };
+        fetchWhatsApp();
+    }, []);
 
     // Redirect if not logged in
     useEffect(() => {
@@ -367,7 +383,7 @@ function DashboardContent() {
                                             <span className="text-2xl font-light text-purple-400">₹{cartTotal}</span>
                                         </div>
                                         <a
-                                            href={`https://wa.me/919876543210?text=Hi! I'd like to order:%0A${cartItems.map(item => `- ${item.quantity}x ${item.name} (₹${item.price * item.quantity})`).join('%0A')}%0A%0ATotal: ₹${cartTotal}`}
+                                            href={whatsappNumber ? `https://wa.me/${whatsappNumber.replace(/[^0-9]/g, '')}?text=Hi! I'd like to order:%0A${cartItems.map(item => `- ${item.quantity}x ${item.name} (₹${item.price * item.quantity})`).join('%0A')}%0A%0ATotal: ₹${cartTotal}` : '#'}
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 bg-green-600 text-white rounded-full text-sm font-medium hover:bg-green-500 transition-colors"

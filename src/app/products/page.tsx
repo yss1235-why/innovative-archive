@@ -6,7 +6,7 @@ import { Navbar } from "@/components/ui/Navbar";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useAuth } from "@/lib/AuthContext";
 import { useCart } from "@/lib/CartContext";
-import { collection, query, where, onSnapshot, Query, DocumentData } from "firebase/firestore";
+import { collection, query, where, onSnapshot, Query, DocumentData, doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Box, Coffee, Shirt, ShoppingCart, Loader2, Smartphone, Download, Copy, Check } from "lucide-react";
 import Link from "next/link";
@@ -50,8 +50,24 @@ function ProductsContent() {
     const [loading, setLoading] = useState(true);
     const [copiedProductId, setCopiedProductId] = useState<string | null>(null);
     const [addedToCartId, setAddedToCartId] = useState<string | null>(null);
+    const [whatsappNumber, setWhatsappNumber] = useState<string>("");
     const { user, userData } = useAuth();
     const { addToCart } = useCart();
+
+    // Fetch WhatsApp number from settings
+    useEffect(() => {
+        const fetchWhatsApp = async () => {
+            try {
+                const settingsDoc = await getDoc(doc(db, "settings", "app"));
+                if (settingsDoc.exists()) {
+                    setWhatsappNumber(settingsDoc.data().whatsappNumber || "");
+                }
+            } catch (error) {
+                console.error("Error fetching WhatsApp number:", error);
+            }
+        };
+        fetchWhatsApp();
+    }, []);
 
     // Real-time products listener - updates immediately when admin adds/removes products
     useEffect(() => {
@@ -247,7 +263,7 @@ function ProductsContent() {
                                 We offer custom design services. Contact us with your idea!
                             </p>
                             <Link
-                                href="https://wa.me/919876543210?text=Hi, I'd like to discuss a custom order"
+                                href={whatsappNumber ? `https://wa.me/${whatsappNumber.replace(/[^0-9]/g, '')}?text=Hi, I'd like to discuss a custom order` : '#'}
                                 target="_blank"
                                 className="inline-flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-full text-sm font-medium hover:bg-green-500 transition-colors"
                             >
