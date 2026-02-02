@@ -5,9 +5,10 @@ import { useSearchParams } from "next/navigation";
 import { Navbar } from "@/components/ui/Navbar";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useAuth } from "@/lib/AuthContext";
+import { useCart } from "@/lib/CartContext";
 import { collection, query, where, onSnapshot, Query, DocumentData } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Box, Coffee, Shirt, ShoppingCart, Loader2, Smartphone, Download } from "lucide-react";
+import { Box, Coffee, Shirt, ShoppingCart, Loader2, Smartphone, Download, Copy, Check } from "lucide-react";
 import Link from "next/link";
 
 interface Product {
@@ -47,7 +48,10 @@ function ProductsContent() {
     const [activeCategory, setActiveCategory] = useState(initialCategory);
     const [products, setProducts] = useState<Product[]>([]);
     const [loading, setLoading] = useState(true);
+    const [copiedProductId, setCopiedProductId] = useState<string | null>(null);
+    const [addedToCartId, setAddedToCartId] = useState<string | null>(null);
     const { user, userData } = useAuth();
+    const { addToCart } = useCart();
 
     // Real-time products listener - updates immediately when admin adds/removes products
     useEffect(() => {
@@ -175,20 +179,58 @@ function ProductsContent() {
                                             ) : (
                                                 <>
                                                     <span className="text-lg font-light">₹{product.price}</span>
-                                                    <button className={`p-2 rounded-full bg-${color}-500/10 text-${color}-400 hover:bg-${color}-500/20 transition-colors cursor-pointer`}>
-                                                        <ShoppingCart className="w-4 h-4" />
+                                                    <button
+                                                        onClick={() => {
+                                                            addToCart({
+                                                                id: product.id,
+                                                                name: product.name,
+                                                                price: product.price,
+                                                                category: product.category,
+                                                                imageUrl: product.imageUrl,
+                                                            });
+                                                            setAddedToCartId(product.id);
+                                                            setTimeout(() => setAddedToCartId(null), 1500);
+                                                        }}
+                                                        className={`p-2 rounded-full transition-all cursor-pointer ${addedToCartId === product.id
+                                                            ? "bg-green-500/20 text-green-400"
+                                                            : `bg-${color}-500/10 text-${color}-400 hover:bg-${color}-500/20`
+                                                            }`}
+                                                    >
+                                                        {addedToCartId === product.id ? (
+                                                            <Check className="w-4 h-4" />
+                                                        ) : (
+                                                            <ShoppingCart className="w-4 h-4" />
+                                                        )}
                                                     </button>
                                                 </>
                                             )}
                                         </div>
 
                                         {/* Referral link option */}
-                                        {user && userData?.referralCode && (
+                                        {user && userData?.referralCode && product.category !== "app" && (
                                             <div className="mt-3 pt-3 border-t border-white/5">
-                                                <p className="text-xs text-stone-600 mb-1">Share & Earn:</p>
-                                                <code className="text-xs text-green-400/70 break-all">
-                                                    ?ref={userData.referralCode}
-                                                </code>
+                                                <p className="text-xs text-stone-600 mb-2">Share & Earn:</p>
+                                                <div className="flex items-center gap-2">
+                                                    <code className="flex-1 text-xs text-green-400/70 bg-stone-900/50 px-2 py-1 rounded truncate">
+                                                        {typeof window !== 'undefined' ? `${window.location.origin}/products?category=${product.category}&ref=${userData.referralCode}` : `?ref=${userData.referralCode}`}
+                                                    </code>
+                                                    <button
+                                                        onClick={() => {
+                                                            const link = `${window.location.origin}/products?category=${product.category}&ref=${userData.referralCode}`;
+                                                            navigator.clipboard.writeText(link);
+                                                            setCopiedProductId(product.id);
+                                                            setTimeout(() => setCopiedProductId(null), 2000);
+                                                        }}
+                                                        className="p-1.5 rounded bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors cursor-pointer flex-shrink-0"
+                                                        title="Copy referral link"
+                                                    >
+                                                        {copiedProductId === product.id ? (
+                                                            <Check className="w-3 h-3" />
+                                                        ) : (
+                                                            <Copy className="w-3 h-3" />
+                                                        )}
+                                                    </button>
+                                                </div>
                                             </div>
                                         )}
                                     </GlassCard>
