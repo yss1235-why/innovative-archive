@@ -1,15 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { Navbar } from "@/components/ui/Navbar";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useAuth } from "@/lib/AuthContext";
 import { collection, query, where, getDocs, doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { getWalletData, formatCurrency } from "@/lib/wallet";
+import { getReferralStats, ReferralStats } from "@/lib/referral";
 import {
     Package, ShoppingCart, Users, User, Copy, Check,
-    Phone, Save, ExternalLink, Loader2
+    Phone, Save, ExternalLink, Loader2, Wallet, ArrowRight
 } from "lucide-react";
 
 type TabType = "orders" | "cart" | "referrals" | "profile";
@@ -30,7 +33,20 @@ interface Referral {
     createdAt: { seconds: number };
 }
 
+// Wrapper component with Suspense
 export default function DashboardPage() {
+    return (
+        <Suspense fallback={
+            <main className="min-h-screen bg-stone-950 flex items-center justify-center">
+                <Loader2 className="w-8 h-8 text-purple-400 animate-spin" />
+            </main>
+        }>
+            <DashboardContent />
+        </Suspense>
+    );
+}
+
+function DashboardContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { user, userData, loading } = useAuth();
@@ -148,7 +164,50 @@ export default function DashboardPage() {
 
                 <div className="container mx-auto px-4 pt-32 pb-20 max-w-4xl">
                     <h1 className="text-3xl font-light mb-2">Dashboard</h1>
-                    <p className="text-stone-500 mb-8">Welcome back, {user.displayName}</p>
+                    <p className="text-stone-500 mb-6">Welcome back, {user.displayName}</p>
+
+                    {/* Quick Access Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+                        {/* Wallet Card */}
+                        <Link href="/dashboard/wallet">
+                            <GlassCard className="hover:border-cyan-500/30 transition-colors cursor-pointer">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center">
+                                            <Wallet className="w-5 h-5 text-cyan-400" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-stone-500">Wallet Balance</p>
+                                            <p className="text-xl font-semibold text-cyan-400">
+                                                {formatCurrency(userData?.wallet_balance || 0)}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <ArrowRight className="w-5 h-5 text-stone-600" />
+                                </div>
+                            </GlassCard>
+                        </Link>
+
+                        {/* Referrals Card */}
+                        <Link href="/dashboard/referrals">
+                            <GlassCard className="hover:border-green-500/30 transition-colors cursor-pointer">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                                            <Users className="w-5 h-5 text-green-400" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-stone-500">Refer & Earn</p>
+                                            <p className="text-sm text-green-400">
+                                                Share your link →
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <ArrowRight className="w-5 h-5 text-stone-600" />
+                                </div>
+                            </GlassCard>
+                        </Link>
+                    </div>
 
                     {/* Tabs */}
                     <div className="flex gap-2 mb-8 flex-wrap">
@@ -157,8 +216,8 @@ export default function DashboardPage() {
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id as TabType)}
                                 className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm transition-all cursor-pointer ${activeTab === tab.id
-                                        ? "bg-white text-black"
-                                        : "bg-white/5 text-stone-400 hover:bg-white/10 border border-white/10"
+                                    ? "bg-white text-black"
+                                    : "bg-white/5 text-stone-400 hover:bg-white/10 border border-white/10"
                                     }`}
                             >
                                 <tab.icon className="w-4 h-4" />

@@ -1,22 +1,23 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Navbar } from "@/components/ui/Navbar";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useAuth } from "@/lib/AuthContext";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Box, Coffee, Shirt, ShoppingCart, Loader2 } from "lucide-react";
+import { Box, Coffee, Shirt, ShoppingCart, Loader2, Smartphone, Download } from "lucide-react";
 import Link from "next/link";
 
 interface Product {
     id: string;
     name: string;
-    category: "3d-print" | "mug" | "tshirt";
+    category: "3d-print" | "mug" | "tshirt" | "app";
     price: number;
     imageUrl: string;
     description: string;
+    downloadUrl?: string;
 }
 
 const categories = [
@@ -24,9 +25,23 @@ const categories = [
     { id: "3d-print", name: "3D Printing", icon: Box },
     { id: "mug", name: "Mugs", icon: Coffee },
     { id: "tshirt", name: "T-Shirts", icon: Shirt },
+    { id: "app", name: "Apps & Platforms", icon: Smartphone },
 ];
 
+// Wrapper with Suspense
 export default function ProductsPage() {
+    return (
+        <Suspense fallback={
+            <main className="min-h-screen bg-stone-950 flex items-center justify-center">
+                <Loader2 className="w-8 h-8 text-purple-400 animate-spin" />
+            </main>
+        }>
+            <ProductsContent />
+        </Suspense>
+    );
+}
+
+function ProductsContent() {
     const searchParams = useSearchParams();
     const initialCategory = searchParams.get("category") || "all";
     const [activeCategory, setActiveCategory] = useState(initialCategory);
@@ -66,6 +81,7 @@ export default function ProductsPage() {
             case "3d-print": return "blue";
             case "mug": return "orange";
             case "tshirt": return "purple";
+            case "app": return "cyan";
             default: return "stone";
         }
     };
@@ -91,8 +107,8 @@ export default function ProductsPage() {
                                 key={cat.id}
                                 onClick={() => setActiveCategory(cat.id)}
                                 className={`px-4 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 cursor-pointer ${activeCategory === cat.id
-                                        ? "bg-white text-black"
-                                        : "bg-white/5 text-stone-400 hover:bg-white/10 hover:text-white border border-white/10"
+                                    ? "bg-white text-black"
+                                    : "bg-white/5 text-stone-400 hover:bg-white/10 hover:text-white border border-white/10"
                                     }`}
                             >
                                 {cat.icon && <cat.icon className="w-4 h-4" />}
@@ -133,6 +149,7 @@ export default function ProductsPage() {
                                                     {product.category === "3d-print" && <Box className="w-12 h-12 text-stone-700" />}
                                                     {product.category === "mug" && <Coffee className="w-12 h-12 text-stone-700" />}
                                                     {product.category === "tshirt" && <Shirt className="w-12 h-12 text-stone-700" />}
+                                                    {product.category === "app" && <Smartphone className="w-12 h-12 text-stone-700" />}
                                                 </div>
                                             )}
                                         </div>
@@ -142,10 +159,29 @@ export default function ProductsPage() {
                                         <p className="text-stone-500 text-sm mb-3 line-clamp-2">{product.description}</p>
 
                                         <div className="flex items-center justify-between">
-                                            <span className="text-lg font-light">₹{product.price}</span>
-                                            <button className={`p-2 rounded-full bg-${color}-500/10 text-${color}-400 hover:bg-${color}-500/20 transition-colors cursor-pointer`}>
-                                                <ShoppingCart className="w-4 h-4" />
-                                            </button>
+                                            {product.category === "app" ? (
+                                                <>
+                                                    <span className="text-sm text-cyan-400 font-medium">Free App</span>
+                                                    {product.downloadUrl && (
+                                                        <a
+                                                            href={product.downloadUrl}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="px-4 py-2 rounded-full bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors flex items-center gap-2 text-sm font-medium"
+                                                        >
+                                                            <Download className="w-4 h-4" />
+                                                            Download
+                                                        </a>
+                                                    )}
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span className="text-lg font-light">₹{product.price}</span>
+                                                    <button className={`p-2 rounded-full bg-${color}-500/10 text-${color}-400 hover:bg-${color}-500/20 transition-colors cursor-pointer`}>
+                                                        <ShoppingCart className="w-4 h-4" />
+                                                    </button>
+                                                </>
+                                            )}
                                         </div>
 
                                         {/* Referral link option */}

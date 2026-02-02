@@ -13,10 +13,11 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
 import {
     Package, ShoppingBag, Users, Settings, Loader2,
-    Check, X, Trash2, Plus, Upload, Save, Phone
+    Check, X, Trash2, Plus, Upload, Save, Phone, Image,
+    Wallet, Banknote, AlertCircle
 } from "lucide-react";
 
-type TabType = "orders" | "products" | "referrals" | "settings";
+type TabType = "orders" | "products" | "referrals" | "withdrawals" | "wallets" | "settings";
 
 interface Order {
     id: string;
@@ -31,10 +32,11 @@ interface Order {
 interface Product {
     id: string;
     name: string;
-    category: "3d-print" | "mug" | "tshirt";
+    category: "3d-print" | "mug" | "tshirt" | "app";
     price: number;
     imageUrl: string;
     description: string;
+    downloadUrl?: string;
 }
 
 interface Referral {
@@ -51,6 +53,38 @@ interface Referral {
 interface AppSettings {
     commissionPercent: number;
     whatsappNumber: string;
+    minWithdrawal?: number;
+    maxWalletUsagePercent?: number;
+    serviceImages?: {
+        "3d-print": string;
+        mug: string;
+        tshirt: string;
+        app: string;
+    };
+}
+
+interface Withdrawal {
+    id: string;
+    userId: string;
+    userEmail?: string;
+    userName?: string;
+    amount: number;
+    upiId: string;
+    fullName: string;
+    phone: string;
+    status: "pending" | "approved" | "rejected";
+    createdAt: { seconds: number };
+    processedAt?: { seconds: number };
+    adminNote?: string;
+}
+
+interface UserWallet {
+    id: string;
+    email: string;
+    displayName?: string;
+    wallet_balance: number;
+    wallet_on_hold: number;
+    referralCode?: string;
 }
 
 export default function AdminPage() {
@@ -61,9 +95,35 @@ export default function AdminPage() {
     const [orders, setOrders] = useState<Order[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
     const [referrals, setReferrals] = useState<Referral[]>([]);
-    const [settings, setSettings] = useState<AppSettings>({ commissionPercent: 10, whatsappNumber: "" });
+    const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
+    const [userWallets, setUserWallets] = useState<UserWallet[]>([]);
+    const [settings, setSettings] = useState<AppSettings>({
+        commissionPercent: 1,
+        whatsappNumber: "",
+        minWithdrawal: 500,
+        maxWalletUsagePercent: 40,
+        serviceImages: {
+            "3d-print": "/service_3d_printing.png",
+            mug: "/service_custom_mugs.png",
+            tshirt: "/service_tshirts.png",
+            app: "/service_apps.png",
+        },
+    });
     const [dataLoading, setDataLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [processingWithdrawal, setProcessingWithdrawal] = useState<string | null>(null);
+    const [serviceImageFiles, setServiceImageFiles] = useState<{
+        "3d-print": File | null;
+        mug: File | null;
+        tshirt: File | null;
+        app: File | null;
+    }>({
+        "3d-print": null,
+        mug: null,
+        tshirt: null,
+        app: null,
+    });
+    const [uploadingService, setUploadingService] = useState<string | null>(null);
 
     // New product form
     const [newProduct, setNewProduct] = useState({
@@ -72,6 +132,7 @@ export default function AdminPage() {
         price: 0,
         description: "",
         imageFile: null as File | null,
+        downloadUrl: "",
     });
     const [uploading, setUploading] = useState(false);
 
@@ -114,10 +175,41 @@ export default function AdminPage() {
                 );
                 setReferrals(referralsWithInfo as Referral[]);
 
+                // Load withdrawals with user info
+                const withdrawalsSnap = await getDocs(collection(db, "withdrawals"));
+                const withdrawalsWithInfo = await Promise.all(
+                    withdrawalsSnap.docs.map(async (d) => {
+                        const data = d.data();
+                        const userDoc = await getDoc(doc(db, "users", data.userId));
+                        const userData = userDoc.data();
+                        return {
+                            id: d.id,
+                            ...data,
+                            userEmail: userData?.email,
+                            userName: userData?.displayName,
+                        };
+                    })
+                );
+                setWithdrawals(withdrawalsWithInfo as Withdrawal[]);
+
+                // Load user wallets (users with wallet_balance > 0)
+                const usersSnap = await getDocs(collection(db, "users"));
+                const walletsData = usersSnap.docs
+                    .map(d => ({
+                        id: d.id,
+                        email: d.data().email || "",
+                        displayName: d.data().displayName || "",
+                        wallet_balance: d.data().wallet_balance || 0,
+                        wallet_on_hold: d.data().wallet_on_hold || 0,
+                        referralCode: d.data().referralCode || "",
+                    }))
+                    .filter(u => u.wallet_balance > 0 || u.wallet_on_hold > 0);
+                setUserWallets(walletsData);
+
                 // Load settings
                 const settingsDoc = await getDoc(doc(db, "settings", "app"));
                 if (settingsDoc.exists()) {
-                    setSettings(settingsDoc.data() as AppSettings);
+                    setSettings({ ...settings, ...settingsDoc.data() as AppSettings });
                 }
             } catch (error) {
                 console.error("Error loading data:", error);
@@ -147,6 +239,67 @@ export default function AdminPage() {
         }
     };
 
+    const processWithdrawal = async (withdrawalId: string, action: "approve" | "reject") => {
+        setProcessingWithdrawal(withdrawalId);
+        try {
+            const withdrawal = withdrawals.find(w => w.id === withdrawalId);
+            if (!withdrawal) throw new Error("Withdrawal not found");
+
+            if (action === "approve") {
+                // Update user wallet: reduce both balance and on_hold
+                const userRef = doc(db, "users", withdrawal.userId);
+                const userDoc = await getDoc(userRef);
+                const userData = userDoc.data();
+
+                if (userData) {
+                    const newBalance = (userData.wallet_balance || 0) - withdrawal.amount;
+                    const newOnHold = (userData.wallet_on_hold || 0) - withdrawal.amount;
+
+                    await updateDoc(userRef, {
+                        wallet_balance: Math.max(0, newBalance),
+                        wallet_on_hold: Math.max(0, newOnHold),
+                    });
+                }
+
+                // Log transaction
+                await addDoc(collection(db, "wallet_transactions"), {
+                    userId: withdrawal.userId,
+                    type: "debit",
+                    amount: withdrawal.amount,
+                    reason: "withdrawal_approved",
+                    withdrawalId: withdrawalId,
+                    createdAt: serverTimestamp(),
+                });
+            } else {
+                // Reject: release the on_hold amount
+                const userRef = doc(db, "users", withdrawal.userId);
+                const userDoc = await getDoc(userRef);
+                const userData = userDoc.data();
+
+                if (userData) {
+                    const newOnHold = (userData.wallet_on_hold || 0) - withdrawal.amount;
+                    await updateDoc(userRef, {
+                        wallet_on_hold: Math.max(0, newOnHold),
+                    });
+                }
+            }
+
+            // Update withdrawal status
+            await updateDoc(doc(db, "withdrawals", withdrawalId), {
+                status: action === "approve" ? "approved" : "rejected",
+                processedAt: serverTimestamp(),
+            });
+
+            setWithdrawals(withdrawals.map(w =>
+                w.id === withdrawalId ? { ...w, status: action === "approve" ? "approved" : "rejected" } : w
+            ));
+        } catch (error) {
+            console.error("Error processing withdrawal:", error);
+            alert("Failed to process withdrawal. Please try again.");
+        }
+        setProcessingWithdrawal(null);
+    };
+
     const addProduct = async () => {
         if (!newProduct.name || !newProduct.price) return;
         setUploading(true);
@@ -164,9 +317,10 @@ export default function AdminPage() {
             const productData = {
                 name: newProduct.name,
                 category: newProduct.category,
-                price: newProduct.price,
+                price: newProduct.category === "app" ? 0 : newProduct.price,
                 description: newProduct.description,
                 imageUrl,
+                ...(newProduct.category === "app" && newProduct.downloadUrl ? { downloadUrl: newProduct.downloadUrl } : {}),
                 createdAt: serverTimestamp(),
             };
 
@@ -174,7 +328,7 @@ export default function AdminPage() {
             setProducts([...products, { id: docRef.id, ...productData }]);
 
             // Reset form
-            setNewProduct({ name: "", category: "mug", price: 0, description: "", imageFile: null });
+            setNewProduct({ name: "", category: "mug", price: 0, description: "", imageFile: null, downloadUrl: "" });
         } catch (error) {
             console.error("Error adding product:", error);
         }
@@ -190,6 +344,33 @@ export default function AdminPage() {
         } catch (error) {
             console.error("Error deleting product:", error);
         }
+    };
+
+    const uploadServiceImage = async (serviceType: "3d-print" | "mug" | "tshirt" | "app") => {
+        const file = serviceImageFiles[serviceType];
+        if (!file) return;
+
+        setUploadingService(serviceType);
+        try {
+            const storageRef = ref(storage, `service-images/${serviceType}_${Date.now()}.${file.name.split('.').pop()}`);
+            await uploadBytes(storageRef, file);
+            const downloadUrl = await getDownloadURL(storageRef);
+
+            const newServiceImages = {
+                ...settings.serviceImages,
+                [serviceType]: downloadUrl,
+            };
+
+            setSettings({ ...settings, serviceImages: newServiceImages as AppSettings["serviceImages"] });
+            setServiceImageFiles({ ...serviceImageFiles, [serviceType]: null });
+
+            // Reset the file input
+            const input = document.getElementById(`service-image-${serviceType}`) as HTMLInputElement;
+            if (input) input.value = "";
+        } catch (error) {
+            console.error("Error uploading service image:", error);
+        }
+        setUploadingService(null);
     };
 
     const saveSettings = async () => {
@@ -226,6 +407,8 @@ export default function AdminPage() {
         { id: "orders", label: "Orders", icon: Package, count: orders.filter(o => o.status !== "delivered").length },
         { id: "products", label: "Products", icon: ShoppingBag, count: products.length },
         { id: "referrals", label: "Referrals", icon: Users, count: referrals.filter(r => r.status === "pending").length },
+        { id: "withdrawals", label: "Withdrawals", icon: Banknote, count: withdrawals.filter(w => w.status === "pending").length },
+        { id: "wallets", label: "User Wallets", icon: Wallet, count: userWallets.length },
         { id: "settings", label: "Settings", icon: Settings },
     ];
 
@@ -249,8 +432,8 @@ export default function AdminPage() {
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id as TabType)}
                                 className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm transition-all cursor-pointer ${activeTab === tab.id
-                                        ? "bg-white text-black"
-                                        : "bg-white/5 text-stone-400 hover:bg-white/10 border border-white/10"
+                                    ? "bg-white text-black"
+                                    : "bg-white/5 text-stone-400 hover:bg-white/10 border border-white/10"
                                     }`}
                             >
                                 <tab.icon className="w-4 h-4" />
@@ -345,14 +528,26 @@ export default function AdminPage() {
                                                 <option value="3d-print">3D Printing</option>
                                                 <option value="mug">Mug</option>
                                                 <option value="tshirt">T-Shirt</option>
+                                                <option value="app">App / Platform</option>
                                             </select>
-                                            <input
-                                                type="number"
-                                                placeholder="Price (₹)"
-                                                value={newProduct.price || ""}
-                                                onChange={(e) => setNewProduct({ ...newProduct, price: Number(e.target.value) })}
-                                                className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-purple-500/50 focus:outline-none"
-                                            />
+                                            {newProduct.category !== "app" && (
+                                                <input
+                                                    type="number"
+                                                    placeholder="Price (₹)"
+                                                    value={newProduct.price || ""}
+                                                    onChange={(e) => setNewProduct({ ...newProduct, price: Number(e.target.value) })}
+                                                    className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-purple-500/50 focus:outline-none"
+                                                />
+                                            )}
+                                            {newProduct.category === "app" && (
+                                                <input
+                                                    type="url"
+                                                    placeholder="Download URL (https://...)"
+                                                    value={newProduct.downloadUrl}
+                                                    onChange={(e) => setNewProduct({ ...newProduct, downloadUrl: e.target.value })}
+                                                    className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-cyan-500/50 focus:outline-none placeholder:text-cyan-300/40"
+                                                />
+                                            )}
                                             <input
                                                 type="file"
                                                 accept="image/*"
@@ -467,6 +662,147 @@ export default function AdminPage() {
                                 </div>
                             )}
 
+                            {/* Withdrawals Tab */}
+                            {activeTab === "withdrawals" && (
+                                <div className="space-y-4">
+                                    <h2 className="text-xl font-light">Withdrawal Requests</h2>
+
+                                    <div className="grid grid-cols-3 gap-4 mb-6">
+                                        <GlassCard>
+                                            <p className="text-stone-500 text-sm">Pending</p>
+                                            <p className="text-2xl font-light text-yellow-400">
+                                                ₹{withdrawals.filter(w => w.status === "pending").reduce((s, w) => s + w.amount, 0)}
+                                            </p>
+                                        </GlassCard>
+                                        <GlassCard>
+                                            <p className="text-stone-500 text-sm">Approved</p>
+                                            <p className="text-2xl font-light text-green-400">
+                                                ₹{withdrawals.filter(w => w.status === "approved").reduce((s, w) => s + w.amount, 0)}
+                                            </p>
+                                        </GlassCard>
+                                        <GlassCard>
+                                            <p className="text-stone-500 text-sm">Rejected</p>
+                                            <p className="text-2xl font-light text-red-400">
+                                                ₹{withdrawals.filter(w => w.status === "rejected").reduce((s, w) => s + w.amount, 0)}
+                                            </p>
+                                        </GlassCard>
+                                    </div>
+
+                                    {withdrawals.length === 0 ? (
+                                        <GlassCard className="text-center py-12">
+                                            <Banknote className="w-12 h-12 text-stone-600 mx-auto mb-4" />
+                                            <p className="text-stone-500">No withdrawal requests yet</p>
+                                        </GlassCard>
+                                    ) : (
+                                        withdrawals
+                                            .sort((a, b) => (a.status === "pending" ? -1 : 1))
+                                            .map((w) => (
+                                                <GlassCard key={w.id} className={w.status === "pending" ? "border-yellow-500/30" : ""}>
+                                                    <div className="flex justify-between items-start mb-4">
+                                                        <div>
+                                                            <p className="font-medium">{w.userName || w.userEmail}</p>
+                                                            <p className="text-sm text-stone-500">{w.userEmail}</p>
+                                                            <p className="text-xs text-stone-600 mt-1">
+                                                                {new Date(w.createdAt.seconds * 1000).toLocaleString()}
+                                                            </p>
+                                                        </div>
+                                                        <span className={`text-2xl font-light ${w.status === "pending" ? "text-yellow-400" : w.status === "approved" ? "text-green-400" : "text-red-400"}`}>
+                                                            ₹{w.amount}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="bg-stone-900/50 rounded-lg p-3 mb-4 space-y-1">
+                                                        <p className="text-sm"><span className="text-stone-500">UPI ID:</span> <span className="text-cyan-300">{w.upiId}</span></p>
+                                                        <p className="text-sm"><span className="text-stone-500">Name:</span> {w.fullName}</p>
+                                                        <p className="text-sm"><span className="text-stone-500">Phone:</span> {w.phone}</p>
+                                                    </div>
+
+                                                    {w.status === "pending" ? (
+                                                        <div className="flex gap-2">
+                                                            <button
+                                                                onClick={() => processWithdrawal(w.id, "approve")}
+                                                                disabled={processingWithdrawal === w.id}
+                                                                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                                                            >
+                                                                {processingWithdrawal === w.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                                                                Approve
+                                                            </button>
+                                                            <button
+                                                                onClick={() => processWithdrawal(w.id, "reject")}
+                                                                disabled={processingWithdrawal === w.id}
+                                                                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                                                            >
+                                                                {processingWithdrawal === w.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-4 h-4" />}
+                                                                Reject
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className={`text-center py-2 rounded-lg text-sm ${w.status === "approved" ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
+                                                            {w.status === "approved" ? "✓ Approved" : "✗ Rejected"}
+                                                        </div>
+                                                    )}
+
+                                                    <div className="mt-3 p-2 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
+                                                        <p className="text-xs text-yellow-300 flex items-center gap-1">
+                                                            <AlertCircle className="w-3 h-3" />
+                                                            Verify UPI name matches: <strong>{w.fullName}</strong>
+                                                        </p>
+                                                    </div>
+                                                </GlassCard>
+                                            ))
+                                    )}
+                                </div>
+                            )}
+
+                            {/* User Wallets Tab */}
+                            {activeTab === "wallets" && (
+                                <div className="space-y-4">
+                                    <h2 className="text-xl font-light">User Wallets</h2>
+
+                                    <div className="grid grid-cols-2 gap-4 mb-6">
+                                        <GlassCard>
+                                            <p className="text-stone-500 text-sm">Total Balance</p>
+                                            <p className="text-2xl font-light text-cyan-400">
+                                                ₹{userWallets.reduce((s, u) => s + u.wallet_balance, 0)}
+                                            </p>
+                                        </GlassCard>
+                                        <GlassCard>
+                                            <p className="text-stone-500 text-sm">On Hold</p>
+                                            <p className="text-2xl font-light text-yellow-400">
+                                                ₹{userWallets.reduce((s, u) => s + u.wallet_on_hold, 0)}
+                                            </p>
+                                        </GlassCard>
+                                    </div>
+
+                                    {userWallets.length === 0 ? (
+                                        <GlassCard className="text-center py-12">
+                                            <Wallet className="w-12 h-12 text-stone-600 mx-auto mb-4" />
+                                            <p className="text-stone-500">No users with wallet balance</p>
+                                        </GlassCard>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {userWallets.map((u) => (
+                                                <GlassCard key={u.id} className="flex justify-between items-center py-3">
+                                                    <div>
+                                                        <p className="font-medium">{u.displayName || "No Name"}</p>
+                                                        <p className="text-sm text-stone-500">{u.email}</p>
+                                                        {u.referralCode && (
+                                                            <code className="text-xs text-purple-400">ref:{u.referralCode}</code>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-lg text-cyan-400">₹{u.wallet_balance}</p>
+                                                        {u.wallet_on_hold > 0 && (
+                                                            <p className="text-xs text-yellow-400">₹{u.wallet_on_hold} on hold</p>
+                                                        )}
+                                                    </div>
+                                                </GlassCard>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             {/* Settings Tab */}
                             {activeTab === "settings" && (
                                 <div className="space-y-6 max-w-xl">
@@ -502,6 +838,162 @@ export default function AdminPage() {
                                         <p className="text-xs text-stone-600 mt-2">
                                             This number will be used for checkout and customer inquiries.
                                         </p>
+                                    </GlassCard>
+
+                                    {/* Wallet Settings */}
+                                    <GlassCard className="border-cyan-500/20">
+                                        <h3 className="text-lg font-light mb-4 flex items-center gap-2">
+                                            <Wallet className="w-5 h-5 text-cyan-400" />
+                                            Wallet Settings
+                                        </h3>
+
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="text-sm text-stone-500 mb-1 block">Minimum Withdrawal Amount (₹)</label>
+                                                <div className="flex items-center gap-4">
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        value={settings.minWithdrawal || 500}
+                                                        onChange={(e) => setSettings({ ...settings, minWithdrawal: Number(e.target.value) })}
+                                                        className="w-32 bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-center focus:border-cyan-500/50 focus:outline-none"
+                                                    />
+                                                    <span className="text-stone-500 text-sm">Users cannot withdraw below this amount</span>
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <label className="text-sm text-stone-500 mb-1 block">Max Wallet Usage at Checkout (%)</label>
+                                                <div className="flex items-center gap-4">
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        max="100"
+                                                        value={settings.maxWalletUsagePercent || 40}
+                                                        onChange={(e) => setSettings({ ...settings, maxWalletUsagePercent: Number(e.target.value) })}
+                                                        className="w-24 bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-center focus:border-cyan-500/50 focus:outline-none"
+                                                    />
+                                                    <span className="text-stone-500 text-sm">% of cart total can be paid with wallet</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </GlassCard>
+
+                                    {/* Service Card Backgrounds */}
+                                    <GlassCard className="border-purple-500/20">
+                                        <h3 className="text-lg font-light mb-4 flex items-center gap-2">
+                                            <Image className="w-5 h-5 text-purple-400" />
+                                            Service Card Backgrounds
+                                        </h3>
+                                        <p className="text-xs text-stone-500 mb-6">
+                                            Upload background images for each service card on the home page.
+                                        </p>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                            {/* 3D Printing */}
+                                            <div className="space-y-2">
+                                                <label className="text-sm text-blue-300">3D Printing</label>
+                                                <div
+                                                    className="aspect-video rounded-lg bg-cover bg-center border border-white/10"
+                                                    style={{ backgroundImage: `url(${settings.serviceImages?.["3d-print"] || "/service_3d_printing.png"})` }}
+                                                />
+                                                <input
+                                                    id="service-image-3d-print"
+                                                    type="file"
+                                                    accept="image/*"
+                                                    onChange={(e) => setServiceImageFiles({ ...serviceImageFiles, "3d-print": e.target.files?.[0] || null })}
+                                                    className="w-full text-xs bg-stone-900 border border-white/10 rounded-lg px-2 py-1.5 file:mr-2 file:py-0.5 file:px-2 file:rounded file:border-0 file:bg-blue-500/20 file:text-blue-300 file:text-xs file:cursor-pointer"
+                                                />
+                                                {serviceImageFiles["3d-print"] && (
+                                                    <button
+                                                        onClick={() => uploadServiceImage("3d-print")}
+                                                        disabled={uploadingService === "3d-print"}
+                                                        className="w-full px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs hover:bg-blue-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                                                    >
+                                                        {uploadingService === "3d-print" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                                                        {uploadingService === "3d-print" ? "Uploading..." : "Upload"}
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            {/* Mugs */}
+                                            <div className="space-y-2">
+                                                <label className="text-sm text-orange-300">Custom Mugs</label>
+                                                <div
+                                                    className="aspect-video rounded-lg bg-cover bg-center border border-white/10"
+                                                    style={{ backgroundImage: `url(${settings.serviceImages?.mug || "/service_custom_mugs.png"})` }}
+                                                />
+                                                <input
+                                                    id="service-image-mug"
+                                                    type="file"
+                                                    accept="image/*"
+                                                    onChange={(e) => setServiceImageFiles({ ...serviceImageFiles, mug: e.target.files?.[0] || null })}
+                                                    className="w-full text-xs bg-stone-900 border border-white/10 rounded-lg px-2 py-1.5 file:mr-2 file:py-0.5 file:px-2 file:rounded file:border-0 file:bg-orange-500/20 file:text-orange-300 file:text-xs file:cursor-pointer"
+                                                />
+                                                {serviceImageFiles.mug && (
+                                                    <button
+                                                        onClick={() => uploadServiceImage("mug")}
+                                                        disabled={uploadingService === "mug"}
+                                                        className="w-full px-3 py-1.5 bg-orange-600 text-white rounded-lg text-xs hover:bg-orange-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                                                    >
+                                                        {uploadingService === "mug" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                                                        {uploadingService === "mug" ? "Uploading..." : "Upload"}
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            {/* T-Shirts */}
+                                            <div className="space-y-2">
+                                                <label className="text-sm text-purple-300">T-Shirts</label>
+                                                <div
+                                                    className="aspect-video rounded-lg bg-cover bg-center border border-white/10"
+                                                    style={{ backgroundImage: `url(${settings.serviceImages?.tshirt || "/service_tshirts.png"})` }}
+                                                />
+                                                <input
+                                                    id="service-image-tshirt"
+                                                    type="file"
+                                                    accept="image/*"
+                                                    onChange={(e) => setServiceImageFiles({ ...serviceImageFiles, tshirt: e.target.files?.[0] || null })}
+                                                    className="w-full text-xs bg-stone-900 border border-white/10 rounded-lg px-2 py-1.5 file:mr-2 file:py-0.5 file:px-2 file:rounded file:border-0 file:bg-purple-500/20 file:text-purple-300 file:text-xs file:cursor-pointer"
+                                                />
+                                                {serviceImageFiles.tshirt && (
+                                                    <button
+                                                        onClick={() => uploadServiceImage("tshirt")}
+                                                        disabled={uploadingService === "tshirt"}
+                                                        className="w-full px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs hover:bg-purple-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                                                    >
+                                                        {uploadingService === "tshirt" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                                                        {uploadingService === "tshirt" ? "Uploading..." : "Upload"}
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            {/* Apps & Platforms */}
+                                            <div className="space-y-2">
+                                                <label className="text-sm text-cyan-300">Apps & Platforms</label>
+                                                <div
+                                                    className="aspect-video rounded-lg bg-cover bg-center border border-white/10"
+                                                    style={{ backgroundImage: `url(${settings.serviceImages?.app || "/service_apps.png"})` }}
+                                                />
+                                                <input
+                                                    id="service-image-app"
+                                                    type="file"
+                                                    accept="image/*"
+                                                    onChange={(e) => setServiceImageFiles({ ...serviceImageFiles, app: e.target.files?.[0] || null })}
+                                                    className="w-full text-xs bg-stone-900 border border-white/10 rounded-lg px-2 py-1.5 file:mr-2 file:py-0.5 file:px-2 file:rounded file:border-0 file:bg-cyan-500/20 file:text-cyan-300 file:text-xs file:cursor-pointer"
+                                                />
+                                                {serviceImageFiles.app && (
+                                                    <button
+                                                        onClick={() => uploadServiceImage("app")}
+                                                        disabled={uploadingService === "app"}
+                                                        className="w-full px-3 py-1.5 bg-cyan-600 text-white rounded-lg text-xs hover:bg-cyan-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                                                    >
+                                                        {uploadingService === "app" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                                                        {uploadingService === "app" ? "Uploading..." : "Upload"}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
                                     </GlassCard>
 
                                     <button

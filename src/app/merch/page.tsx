@@ -1,6 +1,6 @@
 "use client";
 import { Navbar } from "@/components/ui/Navbar";
-import { generateWhatsAppLink } from "@/lib/whatsapp";
+import { generateWhatsAppLink, getWhatsAppNumber } from "@/lib/whatsapp";
 import { ArrowLeft, Send, Upload } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -8,8 +8,13 @@ import { useState } from "react";
 export default function MerchPage() {
     const [isUploading, setIsUploading] = useState(false);
 
-    const handleCheckout = () => {
-        const link = generateWhatsAppLink({
+    const handleCheckout = async () => {
+        const phone = await getWhatsAppNumber();
+        if (!phone) {
+            alert("WhatsApp number not configured. Please contact support.");
+            return;
+        }
+        const link = generateWhatsAppLink(phone, {
             productName: "Custom 3D Mug",
             description: "User Custom Design (Image incoming)"
         });

@@ -1,14 +1,56 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { Navbar } from "@/components/ui/Navbar";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useAuth } from "@/lib/AuthContext";
 import { LoginButton } from "@/components/auth/LoginButton";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import Link from "next/link";
-import { ArrowRight, Box, Coffee, Shirt, Users, Gift, Sparkles, MapPin, Quote } from "lucide-react";
+import { ArrowRight, Gift, Sparkles, MapPin, Quote } from "lucide-react";
+
+// Default service card images (can be overridden by admin)
+const DEFAULT_SERVICE_IMAGES = {
+    "3d-print": "/service_3d_printing.png",
+    "mug": "/service_custom_mugs.png",
+    "tshirt": "/service_tshirts.png",
+    "app": "/service_apps.png",
+};
+
+interface ServiceImages {
+    "3d-print": string;
+    mug: string;
+    tshirt: string;
+    app: string;
+}
 
 export default function Home() {
     const { user, userData } = useAuth();
+    const [serviceImages, setServiceImages] = useState<ServiceImages>(DEFAULT_SERVICE_IMAGES);
+
+    // Load service images from settings
+    useEffect(() => {
+        async function loadSettings() {
+            try {
+                const settingsDoc = await getDoc(doc(db, "settings", "app"));
+                if (settingsDoc.exists()) {
+                    const data = settingsDoc.data();
+                    if (data.serviceImages) {
+                        setServiceImages({
+                            "3d-print": data.serviceImages["3d-print"] || DEFAULT_SERVICE_IMAGES["3d-print"],
+                            mug: data.serviceImages.mug || DEFAULT_SERVICE_IMAGES.mug,
+                            tshirt: data.serviceImages.tshirt || DEFAULT_SERVICE_IMAGES.tshirt,
+                            app: data.serviceImages.app || DEFAULT_SERVICE_IMAGES.app,
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error("Error loading settings:", error);
+            }
+        }
+        loadSettings();
+    }, []);
 
     return (
         <main className="relative min-h-screen w-full overflow-hidden bg-stone-950 text-white selection:bg-purple-500/30">
@@ -35,13 +77,13 @@ export default function Home() {
                     </h1>
 
                     <p className="text-xl md:text-2xl text-stone-400 font-light mb-6 italic">
-                        "Your ideas, printed locally"
+                        "Your Vision. Our Craft."
                     </p>
 
-                    <p className="text-stone-400 font-light max-w-xl mx-auto mb-8 leading-relaxed">
-                        We're <span className="text-white font-medium">3 friends</span> passionate about bringing your creative ideas to life.
-                        From custom mugs to unique t-shirts and 3D printed creations, we support local artists,
-                        creators, and startups with quality printing services.
+                    <p className="text-stone-400 font-light max-w-2xl mx-auto mb-8 leading-relaxed">
+                        We're a crew of <span className="text-white font-medium">3 creative friends</span> turning imagination into reality.
+                        Whether it's a custom 3D print, a personalized mug, or a one-of-a-kind t-shirt — we craft each piece with passion.
+                        <span className="text-purple-300"> Supporting local creators, makers, and dreamers</span> one print at a time.
                     </p>
 
                     <Link
@@ -53,91 +95,104 @@ export default function Home() {
                     </Link>
                 </section>
 
-                {/* Products Section */}
+                {/* Products Section - Service Cards with Background Images */}
                 <section className="container mx-auto px-4 pb-16">
                     <h2 className="text-2xl font-light text-center mb-8 text-stone-300">
                         What We <span className="text-white">Create</span>
                     </h2>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl mx-auto">
                         {/* 3D Printing */}
-                        <Link href="/products?category=3d-print">
-                            <GlassCard className="group cursor-pointer h-full hover:border-blue-500/40 hover:shadow-[0_0_30px_rgba(59,130,246,0.15)] transition-all">
-                                <div className="bg-blue-500/10 p-4 rounded-2xl text-blue-400 w-fit mb-6">
-                                    <Box className="w-8 h-8" />
+                        <Link href="/products?category=3d-print" className="group">
+                            <div className="relative h-72 rounded-2xl overflow-hidden border border-white/10 hover:border-blue-500/40 hover:shadow-[0_0_40px_rgba(59,130,246,0.2)] transition-all duration-300">
+                                {/* Background Image */}
+                                <div
+                                    className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-110"
+                                    style={{ backgroundImage: `url(${serviceImages["3d-print"]})` }}
+                                />
+                                {/* Gradient Overlay */}
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
+                                {/* Content */}
+                                <div className="absolute inset-0 flex flex-col justify-end p-6">
+                                    <h3 className="text-2xl font-light mb-2 text-white group-hover:text-blue-300 transition-colors">3D Printing</h3>
+                                    <p className="text-stone-300 text-sm mb-4 line-clamp-2">
+                                        Custom objects, prototypes & decorative pieces. Bring your designs to life.
+                                    </p>
+                                    <div className="flex items-center gap-2 text-sm text-blue-300 group-hover:underline underline-offset-4">
+                                        View Collection <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                                    </div>
                                 </div>
-                                <h3 className="text-2xl font-light mb-2">3D Printing</h3>
-                                <p className="text-stone-400 text-sm mb-6">
-                                    Custom 3D printed objects, prototypes, and decorative pieces. Bring your designs to life.
-                                </p>
-                                <div className="flex items-center gap-2 text-sm text-blue-300 group-hover:underline underline-offset-4">
-                                    View Collection <ArrowRight className="w-4 h-4" />
-                                </div>
-                            </GlassCard>
+                            </div>
                         </Link>
 
                         {/* Mugs */}
-                        <Link href="/products?category=mug">
-                            <GlassCard className="group cursor-pointer h-full hover:border-orange-500/40 hover:shadow-[0_0_30px_rgba(249,115,22,0.15)] transition-all">
-                                <div className="bg-orange-500/10 p-4 rounded-2xl text-orange-400 w-fit mb-6">
-                                    <Coffee className="w-8 h-8" />
+                        <Link href="/products?category=mug" className="group">
+                            <div className="relative h-72 rounded-2xl overflow-hidden border border-white/10 hover:border-orange-500/40 hover:shadow-[0_0_40px_rgba(249,115,22,0.2)] transition-all duration-300">
+                                {/* Background Image */}
+                                <div
+                                    className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-110"
+                                    style={{ backgroundImage: `url(${serviceImages.mug})` }}
+                                />
+                                {/* Gradient Overlay */}
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
+                                {/* Content */}
+                                <div className="absolute inset-0 flex flex-col justify-end p-6">
+                                    <h3 className="text-2xl font-light mb-2 text-white group-hover:text-orange-300 transition-colors">Custom Mugs</h3>
+                                    <p className="text-stone-300 text-sm mb-4 line-clamp-2">
+                                        Personalized mugs with your designs, photos, or artwork. Perfect for gifts.
+                                    </p>
+                                    <div className="flex items-center gap-2 text-sm text-orange-300 group-hover:underline underline-offset-4">
+                                        View Collection <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                                    </div>
                                 </div>
-                                <h3 className="text-2xl font-light mb-2">Custom Mugs</h3>
-                                <p className="text-stone-400 text-sm mb-6">
-                                    Personalized mugs with your designs, photos, or artwork. Perfect for gifts or daily use.
-                                </p>
-                                <div className="flex items-center gap-2 text-sm text-orange-300 group-hover:underline underline-offset-4">
-                                    View Collection <ArrowRight className="w-4 h-4" />
-                                </div>
-                            </GlassCard>
+                            </div>
                         </Link>
 
                         {/* T-Shirts */}
-                        <Link href="/products?category=tshirt">
-                            <GlassCard className="group cursor-pointer h-full hover:border-purple-500/40 hover:shadow-[0_0_30px_rgba(168,85,247,0.15)] transition-all">
-                                <div className="bg-purple-500/10 p-4 rounded-2xl text-purple-400 w-fit mb-6">
-                                    <Shirt className="w-8 h-8" />
+                        <Link href="/products?category=tshirt" className="group">
+                            <div className="relative h-72 rounded-2xl overflow-hidden border border-white/10 hover:border-purple-500/40 hover:shadow-[0_0_40px_rgba(168,85,247,0.2)] transition-all duration-300">
+                                {/* Background Image */}
+                                <div
+                                    className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-110"
+                                    style={{ backgroundImage: `url(${serviceImages.tshirt})` }}
+                                />
+                                {/* Gradient Overlay */}
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
+                                {/* Content */}
+                                <div className="absolute inset-0 flex flex-col justify-end p-6">
+                                    <h3 className="text-2xl font-light mb-2 text-white group-hover:text-purple-300 transition-colors">T-Shirts</h3>
+                                    <p className="text-stone-300 text-sm mb-4 line-clamp-2">
+                                        High-quality printed tees with custom designs. Express yourself in style.
+                                    </p>
+                                    <div className="flex items-center gap-2 text-sm text-purple-300 group-hover:underline underline-offset-4">
+                                        View Collection <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                                    </div>
                                 </div>
-                                <h3 className="text-2xl font-light mb-2">T-Shirts</h3>
-                                <p className="text-stone-400 text-sm mb-6">
-                                    High-quality printed t-shirts with custom designs. Express yourself in style.
-                                </p>
-                                <div className="flex items-center gap-2 text-sm text-purple-300 group-hover:underline underline-offset-4">
-                                    View Collection <ArrowRight className="w-4 h-4" />
-                                </div>
-                            </GlassCard>
+                            </div>
                         </Link>
-                    </div>
-                </section>
 
-                {/* Founders Section */}
-                <section className="container mx-auto px-4 py-16 border-t border-white/5">
-                    <div className="flex flex-col items-center text-center max-w-2xl mx-auto">
-                        <div className="flex items-center gap-2 mb-4">
-                            <Users className="w-5 h-5 text-stone-500" />
-                            <span className="text-sm text-stone-500 uppercase tracking-wider">The Team</span>
-                        </div>
-
-                        <h2 className="text-2xl font-light mb-6 text-stone-300">
-                            Founded by <span className="text-white">3 Passionate Creators</span>
-                        </h2>
-
-                        {/* Founder Icons */}
-                        <div className="flex gap-4 mb-6">
-                            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-500/20 to-blue-600/10 border border-blue-500/20 flex items-center justify-center">
-                                <span className="text-2xl">👨‍💻</span>
+                        {/* Apps & Platforms */}
+                        <Link href="/products?category=app" className="group">
+                            <div className="relative h-72 rounded-2xl overflow-hidden border border-white/10 hover:border-cyan-500/40 hover:shadow-[0_0_40px_rgba(6,182,212,0.2)] transition-all duration-300">
+                                {/* Background Image */}
+                                <div
+                                    className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-110"
+                                    style={{ backgroundImage: `url(${serviceImages.app})` }}
+                                />
+                                {/* Gradient Overlay */}
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
+                                {/* Content */}
+                                <div className="absolute inset-0 flex flex-col justify-end p-6">
+                                    <h3 className="text-2xl font-light mb-2 text-white group-hover:text-cyan-300 transition-colors">Apps & Platforms</h3>
+                                    <p className="text-stone-300 text-sm mb-4 line-clamp-2">
+                                        Mobile apps, web platforms & desktop tools. Digital solutions built with passion.
+                                    </p>
+                                    <div className="flex items-center gap-2 text-sm text-cyan-300 group-hover:underline underline-offset-4">
+                                        View Apps <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                                    </div>
+                                </div>
                             </div>
-                            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-500/20 to-purple-600/10 border border-purple-500/20 flex items-center justify-center">
-                                <span className="text-2xl">👨‍🎨</span>
-                            </div>
-                            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-orange-500/20 to-orange-600/10 border border-orange-500/20 flex items-center justify-center">
-                                <span className="text-2xl">👨‍🔧</span>
-                            </div>
-                        </div>
-
-                        <p className="text-stone-500 text-sm">
-                            A team of friends bringing creativity and quality to every print.
-                        </p>
+                        </Link>
                     </div>
                 </section>
 
@@ -205,7 +260,7 @@ export default function Home() {
                             {/* Brand */}
                             <div className="text-center md:text-left">
                                 <h3 className="text-lg font-light mb-1">Innovative Archive</h3>
-                                <p className="text-stone-600 text-xs">Your ideas, printed locally</p>
+                                <p className="text-stone-600 text-xs">Your Vision. Our Craft.</p>
                             </div>
 
                             {/* Address */}
