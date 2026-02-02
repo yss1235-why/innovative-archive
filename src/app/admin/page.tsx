@@ -1,20 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Navbar } from "@/components/ui/Navbar";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useAuth } from "@/lib/AuthContext";
 import {
     collection, getDocs, doc, updateDoc, addDoc, deleteDoc,
-    getDoc, setDoc, serverTimestamp
+    getDoc, setDoc, serverTimestamp, onSnapshot
 } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { db, storage } from "@/lib/firebase";
+import { uploadToCloudinary } from "@/lib/cloudinary";
+import { db } from "@/lib/firebase";
 import {
     Package, ShoppingBag, Users, Settings, Loader2,
     Check, X, Trash2, Plus, Upload, Save, Phone, Image,
-    Wallet, Banknote, AlertCircle
+    Wallet, Banknote, AlertCircle, RefreshCw
 } from "lucide-react";
 
 type TabType = "orders" | "products" | "referrals" | "withdrawals" | "wallets" | "settings";
@@ -27,6 +27,7 @@ interface Order {
     total: number;
     status: "pending" | "processing" | "delivered";
     createdAt: { seconds: number };
+    userPhone?: string;
 }
 
 interface Product {
@@ -50,30 +51,15 @@ interface Referral {
     createdAt: { seconds: number };
 }
 
-interface AppSettings {
-    commissionPercent: number;
-    whatsappNumber: string;
-    minWithdrawal?: number;
-    maxWalletUsagePercent?: number;
-    serviceImages?: {
-        "3d-print": string;
-        mug: string;
-        tshirt: string;
-        app: string;
-    };
-}
-
 interface Withdrawal {
     id: string;
     userId: string;
     userEmail?: string;
     userName?: string;
     amount: number;
-    upiId: string;
-    fullName: string;
-    phone: string;
+    paymentDetails: { fullName: string; phone: string; upiId: string };
     status: "pending" | "approved" | "rejected";
-    createdAt: { seconds: number };
+    requestedAt: { seconds: number };
     processedAt?: { seconds: number };
     adminNote?: string;
 }
@@ -81,11 +67,41 @@ interface Withdrawal {
 interface UserWallet {
     id: string;
     email: string;
-    displayName?: string;
+    displayName: string;
     wallet_balance: number;
     wallet_on_hold: number;
-    referralCode?: string;
+    referralCode: string;
 }
+
+interface AppSettings {
+    commissionRate: number;
+    whatsappNumber: string;
+    minWithdrawal: number;
+    withdrawalCooldownDays: number;
+    maxWalletUsagePercent?: number;
+    cloudinaryCloudName?: string;
+    cloudinaryUploadPreset?: string;
+    serviceImages?: {
+        "3d-print"?: string;
+        mug?: string;
+        tshirt?: string;
+        app?: string;
+    };
+}
+
+const defaultSettings: AppSettings = {
+    whatsappNumber: "",
+    commissionRate: 10,
+    minWithdrawal: 100,
+    withdrawalCooldownDays: 7,
+    maxWalletUsagePercent: 40,
+    serviceImages: {
+        "3d-print": "/service_3d_printing.png",
+        mug: "/service_custom_mugs.png",
+        tshirt: "/service_tshirts.png",
+        app: "/service_apps.png",
+    },
+};
 
 export default function AdminPage() {
     const router = useRouter();
@@ -97,44 +113,40 @@ export default function AdminPage() {
     const [referrals, setReferrals] = useState<Referral[]>([]);
     const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
     const [userWallets, setUserWallets] = useState<UserWallet[]>([]);
-    const [settings, setSettings] = useState<AppSettings>({
-        commissionPercent: 1,
-        whatsappNumber: "",
-        minWithdrawal: 500,
-        maxWalletUsagePercent: 40,
-        serviceImages: {
-            "3d-print": "/service_3d_printing.png",
-            mug: "/service_custom_mugs.png",
-            tshirt: "/service_tshirts.png",
-            app: "/service_apps.png",
-        },
-    });
+    const [settings, setSettings] = useState<AppSettings>(defaultSettings);
     const [dataLoading, setDataLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [refreshingProducts, setRefreshingProducts] = useState(false);
     const [processingWithdrawal, setProcessingWithdrawal] = useState<string | null>(null);
+    const [uploadingService, setUploadingService] = useState<string | null>(null);
+
+    // New product form
+    const [newProduct, setNewProduct] = useState({
+        name: "",
+        category: "3d-print" as Product["category"],
+        price: "",
+        description: "",
+        imageFile: null as File | null,
+        downloadUrl: "",
+    });
+    const [uploading, setUploading] = useState(false);
+
+    // Wallet adjustment
+    const [walletAdjustment, setWalletAdjustment] = useState({
+        userId: "",
+        amount: "",
+        reason: "",
+    });
+
+    // Service image uploads
     const [serviceImageFiles, setServiceImageFiles] = useState<{
-        "3d-print": File | null;
-        mug: File | null;
-        tshirt: File | null;
-        app: File | null;
+        [key: string]: File | null;
     }>({
         "3d-print": null,
         mug: null,
         tshirt: null,
         app: null,
     });
-    const [uploadingService, setUploadingService] = useState<string | null>(null);
-
-    // New product form
-    const [newProduct, setNewProduct] = useState({
-        name: "",
-        category: "mug" as Product["category"],
-        price: 0,
-        description: "",
-        imageFile: null as File | null,
-        downloadUrl: "",
-    });
-    const [uploading, setUploading] = useState(false);
 
     // Redirect if not admin
     useEffect(() => {
@@ -143,83 +155,115 @@ export default function AdminPage() {
         }
     }, [user, isAdmin, loading, router]);
 
-    // Load all data
+    // Real-time orders listener - see new orders instantly
     useEffect(() => {
-        async function loadData() {
-            if (!isAdmin) return;
-            setDataLoading(true);
+        if (!isAdmin) return;
 
-            try {
-                // Load orders
-                const ordersSnap = await getDocs(collection(db, "orders"));
-                setOrders(ordersSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Order[]);
-
-                // Load products
-                const productsSnap = await getDocs(collection(db, "products"));
-                setProducts(productsSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Product[]);
-
-                // Load referrals with user info
-                const referralsSnap = await getDocs(collection(db, "referrals"));
-                const referralsWithInfo = await Promise.all(
-                    referralsSnap.docs.map(async (d) => {
-                        const data = d.data();
-                        const userDoc = await getDoc(doc(db, "users", data.referrerId));
-                        const userData = userDoc.data();
-                        return {
-                            id: d.id,
-                            ...data,
-                            referrerEmail: userData?.email,
-                            referrerPhone: userData?.phone,
-                        };
-                    })
-                );
-                setReferrals(referralsWithInfo as Referral[]);
-
-                // Load withdrawals with user info
-                const withdrawalsSnap = await getDocs(collection(db, "withdrawals"));
-                const withdrawalsWithInfo = await Promise.all(
-                    withdrawalsSnap.docs.map(async (d) => {
-                        const data = d.data();
-                        const userDoc = await getDoc(doc(db, "users", data.userId));
-                        const userData = userDoc.data();
-                        return {
-                            id: d.id,
-                            ...data,
-                            userEmail: userData?.email,
-                            userName: userData?.displayName,
-                        };
-                    })
-                );
-                setWithdrawals(withdrawalsWithInfo as Withdrawal[]);
-
-                // Load user wallets (users with wallet_balance > 0)
-                const usersSnap = await getDocs(collection(db, "users"));
-                const walletsData = usersSnap.docs
-                    .map(d => ({
+        const unsubscribe = onSnapshot(collection(db, "orders"), async (snapshot) => {
+            const ordersData = await Promise.all(
+                snapshot.docs.map(async (d) => {
+                    const data = d.data();
+                    const userDoc = await getDoc(doc(db, "users", data.userId));
+                    const userData = userDoc.data();
+                    return {
                         id: d.id,
-                        email: d.data().email || "",
-                        displayName: d.data().displayName || "",
-                        wallet_balance: d.data().wallet_balance || 0,
-                        wallet_on_hold: d.data().wallet_on_hold || 0,
-                        referralCode: d.data().referralCode || "",
-                    }))
-                    .filter(u => u.wallet_balance > 0 || u.wallet_on_hold > 0);
-                setUserWallets(walletsData);
+                        ...data,
+                        userEmail: userData?.email,
+                        userPhone: userData?.phone,
+                    };
+                })
+            );
+            setOrders(ordersData as Order[]);
+        }, (error) => {
+            console.error("Error listening to orders:", error);
+        });
 
-                // Load settings
-                const settingsDoc = await getDoc(doc(db, "settings", "app"));
-                if (settingsDoc.exists()) {
-                    setSettings({ ...settings, ...settingsDoc.data() as AppSettings });
-                }
-            } catch (error) {
-                console.error("Error loading data:", error);
+        return () => unsubscribe();
+    }, [isAdmin]);
+
+    // Real-time withdrawals listener - see new withdrawal requests instantly
+    useEffect(() => {
+        if (!isAdmin) return;
+
+        const unsubscribe = onSnapshot(collection(db, "withdrawals"), async (snapshot) => {
+            const withdrawalsData = await Promise.all(
+                snapshot.docs.map(async (d) => {
+                    const data = d.data();
+                    const userDoc = await getDoc(doc(db, "users", data.userId));
+                    const userData = userDoc.data();
+                    return {
+                        id: d.id,
+                        ...data,
+                        userEmail: userData?.email,
+                        userName: userData?.displayName,
+                    };
+                })
+            );
+            setWithdrawals(withdrawalsData as Withdrawal[]);
+        }, (error) => {
+            console.error("Error listening to withdrawals:", error);
+        });
+
+        return () => unsubscribe();
+    }, [isAdmin]);
+
+    // Load other data (products, referrals, wallets, settings) - one-time with refresh option
+    const loadOtherData = useCallback(async () => {
+        if (!isAdmin) return;
+        setRefreshingProducts(true);
+
+        try {
+            // Load products
+            const productsSnap = await getDocs(collection(db, "products"));
+            setProducts(productsSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Product[]);
+
+            // Load referrals with user info
+            const referralsSnap = await getDocs(collection(db, "referrals"));
+            const referralsWithInfo = await Promise.all(
+                referralsSnap.docs.map(async (d) => {
+                    const data = d.data();
+                    const userDoc = await getDoc(doc(db, "users", data.referrerId));
+                    const userData = userDoc.data();
+                    return {
+                        id: d.id,
+                        ...data,
+                        referrerEmail: userData?.email,
+                        referrerPhone: userData?.phone,
+                    };
+                })
+            );
+            setReferrals(referralsWithInfo as Referral[]);
+
+            // Load user wallets (users with wallet_balance > 0)
+            const usersSnap = await getDocs(collection(db, "users"));
+            const walletsData = usersSnap.docs
+                .map(d => ({
+                    id: d.id,
+                    email: d.data().email || "",
+                    displayName: d.data().displayName || "",
+                    wallet_balance: d.data().wallet_balance || 0,
+                    wallet_on_hold: d.data().wallet_on_hold || 0,
+                    referralCode: d.data().referralCode || "",
+                }))
+                .filter(u => u.wallet_balance > 0 || u.wallet_on_hold > 0);
+            setUserWallets(walletsData);
+
+            // Load settings
+            const settingsDoc = await getDoc(doc(db, "settings", "app"));
+            if (settingsDoc.exists()) {
+                setSettings(prev => ({ ...prev, ...settingsDoc.data() as AppSettings }));
             }
-
-            setDataLoading(false);
+        } catch (error) {
+            console.error("Error loading data:", error);
         }
 
-        loadData();
+        setRefreshingProducts(false);
+        setDataLoading(false);
     }, [isAdmin]);
+
+    useEffect(() => {
+        loadOtherData();
+    }, [loadOtherData]);
 
     const updateOrderStatus = async (orderId: string, status: Order["status"]) => {
         try {
@@ -307,28 +351,34 @@ export default function AdminPage() {
         try {
             let imageUrl = "";
 
-            // Upload image if provided
+            // Upload image to Cloudinary if provided
             if (newProduct.imageFile) {
-                const storageRef = ref(storage, `products/${Date.now()}_${newProduct.imageFile.name}`);
-                await uploadBytes(storageRef, newProduct.imageFile);
-                imageUrl = await getDownloadURL(storageRef);
+                const result = await uploadToCloudinary(newProduct.imageFile, "products");
+                if (!result.success) {
+                    alert(result.error || "Failed to upload image");
+                    setUploading(false);
+                    return;
+                }
+                imageUrl = result.url || "";
             }
 
             const productData = {
                 name: newProduct.name,
                 category: newProduct.category,
-                price: newProduct.category === "app" ? 0 : newProduct.price,
+                price: newProduct.category === "app" ? 0 : (typeof newProduct.price === 'string' ? parseFloat(newProduct.price) || 0 : newProduct.price),
                 description: newProduct.description,
                 imageUrl,
                 ...(newProduct.category === "app" && newProduct.downloadUrl ? { downloadUrl: newProduct.downloadUrl } : {}),
                 createdAt: serverTimestamp(),
             };
 
-            const docRef = await addDoc(collection(db, "products"), productData);
-            setProducts([...products, { id: docRef.id, ...productData }]);
+            await addDoc(collection(db, "products"), productData);
+
+            // Refresh products list
+            await loadOtherData();
 
             // Reset form
-            setNewProduct({ name: "", category: "mug", price: 0, description: "", imageFile: null, downloadUrl: "" });
+            setNewProduct({ name: "", category: "3d-print", price: "", description: "", imageFile: null, downloadUrl: "" });
         } catch (error) {
             console.error("Error adding product:", error);
         }
@@ -352,13 +402,16 @@ export default function AdminPage() {
 
         setUploadingService(serviceType);
         try {
-            const storageRef = ref(storage, `service-images/${serviceType}_${Date.now()}.${file.name.split('.').pop()}`);
-            await uploadBytes(storageRef, file);
-            const downloadUrl = await getDownloadURL(storageRef);
+            const result = await uploadToCloudinary(file, "service-images");
+            if (!result.success) {
+                alert(result.error || "Failed to upload service image");
+                setUploadingService(null);
+                return;
+            }
 
             const newServiceImages = {
                 ...settings.serviceImages,
-                [serviceType]: downloadUrl,
+                [serviceType]: result.url,
             };
 
             setSettings({ ...settings, serviceImages: newServiceImages as AppSettings["serviceImages"] });
@@ -369,6 +422,7 @@ export default function AdminPage() {
             if (input) input.value = "";
         } catch (error) {
             console.error("Error uploading service image:", error);
+            alert("Failed to upload service image. Check console for details.");
         }
         setUploadingService(null);
     };
@@ -535,7 +589,7 @@ export default function AdminPage() {
                                                     type="number"
                                                     placeholder="Price (₹)"
                                                     value={newProduct.price || ""}
-                                                    onChange={(e) => setNewProduct({ ...newProduct, price: Number(e.target.value) })}
+                                                    onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
                                                     className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-purple-500/50 focus:outline-none"
                                                 />
                                             )}
@@ -564,7 +618,7 @@ export default function AdminPage() {
                                         </div>
                                         <button
                                             onClick={addProduct}
-                                            disabled={uploading || !newProduct.name || !newProduct.price}
+                                            disabled={uploading || !newProduct.name || (newProduct.category !== "app" && !newProduct.price)}
                                             className="mt-4 px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-500 transition-colors flex items-center gap-2 disabled:opacity-50 cursor-pointer"
                                         >
                                             {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
@@ -703,7 +757,7 @@ export default function AdminPage() {
                                                             <p className="font-medium">{w.userName || w.userEmail}</p>
                                                             <p className="text-sm text-stone-500">{w.userEmail}</p>
                                                             <p className="text-xs text-stone-600 mt-1">
-                                                                {new Date(w.createdAt.seconds * 1000).toLocaleString()}
+                                                                {w.requestedAt?.seconds ? new Date(w.requestedAt.seconds * 1000).toLocaleString() : 'Unknown'}
                                                             </p>
                                                         </div>
                                                         <span className={`text-2xl font-light ${w.status === "pending" ? "text-yellow-400" : w.status === "approved" ? "text-green-400" : "text-red-400"}`}>
@@ -712,9 +766,9 @@ export default function AdminPage() {
                                                     </div>
 
                                                     <div className="bg-stone-900/50 rounded-lg p-3 mb-4 space-y-1">
-                                                        <p className="text-sm"><span className="text-stone-500">UPI ID:</span> <span className="text-cyan-300">{w.upiId}</span></p>
-                                                        <p className="text-sm"><span className="text-stone-500">Name:</span> {w.fullName}</p>
-                                                        <p className="text-sm"><span className="text-stone-500">Phone:</span> {w.phone}</p>
+                                                        <p className="text-sm"><span className="text-stone-500">UPI ID:</span> <span className="text-cyan-300">{w.paymentDetails?.upiId || 'N/A'}</span></p>
+                                                        <p className="text-sm"><span className="text-stone-500">Name:</span> {w.paymentDetails?.fullName || 'N/A'}</p>
+                                                        <p className="text-sm"><span className="text-stone-500">Phone:</span> {w.paymentDetails?.phone || 'N/A'}</p>
                                                     </div>
 
                                                     {w.status === "pending" ? (
@@ -745,7 +799,7 @@ export default function AdminPage() {
                                                     <div className="mt-3 p-2 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
                                                         <p className="text-xs text-yellow-300 flex items-center gap-1">
                                                             <AlertCircle className="w-3 h-3" />
-                                                            Verify UPI name matches: <strong>{w.fullName}</strong>
+                                                            Verify UPI name matches: <strong>{w.paymentDetails?.fullName || 'N/A'}</strong>
                                                         </p>
                                                     </div>
                                                 </GlassCard>
@@ -815,8 +869,8 @@ export default function AdminPage() {
                                                 type="number"
                                                 min="0"
                                                 max="100"
-                                                value={settings.commissionPercent}
-                                                onChange={(e) => setSettings({ ...settings, commissionPercent: Number(e.target.value) })}
+                                                value={settings.commissionRate}
+                                                onChange={(e) => setSettings({ ...settings, commissionRate: Number(e.target.value) })}
                                                 className="w-24 bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-center text-lg focus:border-purple-500/50 focus:outline-none"
                                             />
                                             <span className="text-stone-400">% of order total</span>
@@ -838,6 +892,59 @@ export default function AdminPage() {
                                         <p className="text-xs text-stone-600 mt-2">
                                             This number will be used for checkout and customer inquiries.
                                         </p>
+                                    </GlassCard>
+
+                                    {/* Cloudinary Settings */}
+                                    <GlassCard className="border-pink-500/20">
+                                        <h3 className="text-lg font-light mb-4 flex items-center gap-2">
+                                            <Image className="w-5 h-5 text-pink-400" />
+                                            Cloudinary Image Hosting
+                                        </h3>
+                                        <p className="text-xs text-stone-500 mb-4">
+                                            Configure Cloudinary for reliable image uploads. Get credentials from{" "}
+                                            <a href="https://cloudinary.com/console" target="_blank" rel="noopener noreferrer" className="text-pink-400 hover:underline">
+                                                cloudinary.com/console
+                                            </a>
+                                        </p>
+
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="text-sm text-stone-500 mb-1 block">Cloud Name</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="your-cloud-name"
+                                                    value={settings.cloudinaryCloudName || ""}
+                                                    onChange={(e) => setSettings({ ...settings, cloudinaryCloudName: e.target.value })}
+                                                    className="w-full bg-stone-900 border border-white/10 rounded-lg px-4 py-2 focus:border-pink-500/50 focus:outline-none"
+                                                />
+                                            </div>
+
+                                            <div>
+                                                <label className="text-sm text-stone-500 mb-1 block">Upload Preset (Unsigned)</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="your-unsigned-preset"
+                                                    value={settings.cloudinaryUploadPreset || ""}
+                                                    onChange={(e) => setSettings({ ...settings, cloudinaryUploadPreset: e.target.value })}
+                                                    className="w-full bg-stone-900 border border-white/10 rounded-lg px-4 py-2 focus:border-pink-500/50 focus:outline-none"
+                                                />
+                                                <p className="text-xs text-stone-600 mt-1">
+                                                    Create an unsigned upload preset in Cloudinary: Settings → Upload → Add upload preset → Signing Mode: Unsigned
+                                                </p>
+                                            </div>
+
+                                            {settings.cloudinaryCloudName && settings.cloudinaryUploadPreset ? (
+                                                <div className="flex items-center gap-2 text-green-400 text-sm">
+                                                    <Check className="w-4 h-4" />
+                                                    Cloudinary configured
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center gap-2 text-yellow-400 text-sm">
+                                                    <AlertCircle className="w-4 h-4" />
+                                                    Configure Cloudinary to enable image uploads
+                                                </div>
+                                            )}
+                                        </div>
                                     </GlassCard>
 
                                     {/* Wallet Settings */}

@@ -34,7 +34,7 @@ export function LoginButton({ className = "", referralCode }: LoginButtonProps) 
         <button
             onClick={handleLogin}
             title="Sign in with Google"
-            className={`p-2.5 bg-white text-black rounded-full hover:bg-white/90 hover:scale-105 transition-all flex items-center justify-center cursor-pointer shadow-lg shadow-white/10 ${className}`}
+            className={`w-10 h-10 bg-white text-black rounded-full hover:bg-white/90 hover:scale-105 transition-all flex items-center justify-center cursor-pointer shadow-lg shadow-white/10 ${className}`}
         >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
                 <path

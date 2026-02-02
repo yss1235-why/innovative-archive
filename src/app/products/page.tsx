@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Navbar } from "@/components/ui/Navbar";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useAuth } from "@/lib/AuthContext";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, query, where, onSnapshot, Query, DocumentData } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Box, Coffee, Shirt, ShoppingCart, Loader2, Smartphone, Download } from "lucide-react";
 import Link from "next/link";
@@ -49,31 +49,29 @@ function ProductsContent() {
     const [loading, setLoading] = useState(true);
     const { user, userData } = useAuth();
 
+    // Real-time products listener - updates immediately when admin adds/removes products
     useEffect(() => {
-        async function fetchProducts() {
-            setLoading(true);
-            try {
-                const productsRef = collection(db, "products");
-                let q = productsRef;
+        setLoading(true);
+        const productsRef = collection(db, "products");
+        let q: Query<DocumentData> = productsRef;
 
-                if (activeCategory !== "all") {
-                    q = query(productsRef, where("category", "==", activeCategory)) as typeof productsRef;
-                }
-
-                const snapshot = await getDocs(q);
-                const productList = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                })) as Product[];
-
-                setProducts(productList);
-            } catch (error) {
-                console.error("Error fetching products:", error);
-            }
-            setLoading(false);
+        if (activeCategory !== "all") {
+            q = query(productsRef, where("category", "==", activeCategory));
         }
 
-        fetchProducts();
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const productList = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            })) as Product[];
+            setProducts(productList);
+            setLoading(false);
+        }, (error) => {
+            console.error("Error listening to products:", error);
+            setLoading(false);
+        });
+
+        return () => unsubscribe();
     }, [activeCategory]);
 
     const getCategoryColor = (category: string) => {

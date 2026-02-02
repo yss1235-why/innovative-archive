@@ -30,18 +30,20 @@ export async function getWhatsAppNumber(): Promise<string> {
 
 // Generate WhatsApp link for single product order
 export function generateWhatsAppLink(phone: string, details: OrderDetails): string {
-    const message = `
-*New Order Request* 🛍️
-------------------
-*Item*: ${details.productName}
-${details.quantity ? `*Quantity*: ${details.quantity}` : ""}
-${details.price ? `*Price*: ₹${details.price}` : ""}
-${details.userName ? `*Customer*: ${details.userName}` : ""}
-${details.description ? `*Details*: ${details.description}` : ""}
+    const lines = [
+        "*New Order Request* 🛍️",
+        "------------------",
+        `*Item*: ${details.productName}`,
+        details.quantity ? `*Quantity*: ${details.quantity}` : "",
+        details.price ? `*Price*: ₹${details.price}` : "",
+        details.userName ? `*Customer*: ${details.userName}` : "",
+        details.description ? `*Details*: ${details.description}` : "",
+        "",
+        "*Next Step*:",
+        "I would like to proceed with this order.",
+    ].filter(line => line !== "");
 
-*Next Step*:
-I would like to proceed with this order.
-    `.trim();
+    const message = lines.join("\n");
 
     return `https://wa.me/${phone.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(message)}`;
 }
@@ -52,17 +54,19 @@ export function generateCartCheckoutLink(phone: string, items: CartItem[], total
         `• ${item.quantity}x ${item.name} - ₹${item.price * item.quantity}`
     ).join("\n");
 
-    const message = `
-*Checkout Request* 🛒
-------------------
-${itemsList}
-------------------
-*Total*: ₹${total}
-${userName ? `*Customer*: ${userName}` : ""}
+    const lines = [
+        "*Checkout Request* 🛒",
+        "------------------",
+        itemsList,
+        "------------------",
+        `*Total*: ₹${total}`,
+        userName ? `*Customer*: ${userName}` : "",
+        "",
+        "*Next Step*:",
+        "I would like to complete this order.",
+    ].filter(line => line !== "");
 
-*Next Step*:
-I would like to complete this order.
-    `.trim();
+    const message = lines.join("\n");
 
     return `https://wa.me/${phone.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(message)}`;
 }

@@ -28,6 +28,14 @@ interface ServiceImages {
 export default function Home() {
     const { user, userData } = useAuth();
     const [serviceImages, setServiceImages] = useState<ServiceImages>(DEFAULT_SERVICE_IMAGES);
+    const [referralLink, setReferralLink] = useState<string>("");
+
+    // Set referral link on client side only (prevents hydration mismatch)
+    useEffect(() => {
+        if (userData?.referralCode) {
+            setReferralLink(`${window.location.origin}?ref=${userData.referralCode}`);
+        }
+    }, [userData?.referralCode]);
 
     // Load service images from settings
     useEffect(() => {
@@ -229,7 +237,7 @@ export default function Home() {
                                 <div className="bg-stone-900/50 border border-white/10 rounded-lg p-4 max-w-md mx-auto">
                                     <p className="text-xs text-stone-500 mb-2">Your Referral Link</p>
                                     <code className="text-green-300 text-sm break-all">
-                                        {typeof window !== 'undefined' ? window.location.origin : ''}?ref={userData?.referralCode || '...'}
+                                        {referralLink || 'Loading...'}
                                     </code>
                                 </div>
                                 <Link
@@ -249,14 +257,14 @@ export default function Home() {
                 </section>
 
                 {/* Footer */}
-                <footer className="border-t border-white/5 py-12">
+                <footer className="border-t border-white/5 py-6 md:py-8">
                     <div className="container mx-auto px-4">
                         {/* Another Quote */}
-                        <p className="text-center text-stone-500 italic text-sm mb-8">
+                        <p className="text-center text-stone-500 italic text-sm mb-4 md:mb-6">
                             "Every great design begins with an even better story."
                         </p>
 
-                        <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                        <div className="flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6">
                             {/* Brand */}
                             <div className="text-center md:text-left">
                                 <h3 className="text-lg font-light mb-1">Innovative Archive</h3>
@@ -278,7 +286,7 @@ export default function Home() {
                         </div>
 
                         {/* Tagline */}
-                        <p className="text-center text-stone-700 text-xs mt-8">
+                        <p className="text-center text-stone-700 text-xs mt-4 md:mt-6">
                             Made with ❤️ in the hills of Manipur
                         </p>
                     </div>

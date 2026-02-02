@@ -89,10 +89,31 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Settings (WhatsApp number, Commission %, Referral settings)
+    // Settings (WhatsApp number, Commission %, Referral settings, Cloudinary)
     match /settings/{document=**} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+
+    // Referrals - Track referral relationships and commissions
+    match /referrals/{referralId} {
+      // Users can read referrals where they are the referrer
+      allow read: if isSignedIn() && (resource.data.referrerId == request.auth.uid || isAdmin());
+      
+      // Only admin can manage referrals
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Wallet Transactions - Audit trail for wallet operations
+    match /wallet_transactions/{transactionId} {
+      // Users can read their own transactions
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      
+      // Only admin can create transactions (immutable)
+      allow create: if isAdmin();
+      
+      // Nobody can update or delete - immutable
+      allow update, delete: if false;
     }
   }
 }

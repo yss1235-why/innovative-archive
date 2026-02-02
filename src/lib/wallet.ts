@@ -54,7 +54,7 @@ export function getWalletData(userData: {
     return {
         balance,
         onHold,
-        available: balance - onHold,
+        available: Math.max(0, balance - onHold),
     };
 }
 

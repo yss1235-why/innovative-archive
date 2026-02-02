@@ -1,18 +1,17 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, Suspense, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Navbar } from "@/components/ui/Navbar";
 import { GlassCard } from "@/components/ui/GlassCard";
 import { useAuth } from "@/lib/AuthContext";
-import { collection, query, where, getDocs, doc, updateDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, updateDoc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { getWalletData, formatCurrency } from "@/lib/wallet";
-import { getReferralStats, ReferralStats } from "@/lib/referral";
 import {
     Package, ShoppingCart, Users, User, Copy, Check,
-    Phone, Save, ExternalLink, Loader2, Wallet, ArrowRight
+    Phone, Save, ExternalLink, Loader2, Wallet, ArrowRight, RefreshCw
 } from "lucide-react";
 
 type TabType = "orders" | "cart" | "referrals" | "profile";
@@ -58,8 +57,10 @@ function DashboardContent() {
     const [referrals, setReferrals] = useState<Referral[]>([]);
     const [phone, setPhone] = useState("");
     const [copied, setCopied] = useState(false);
+    const [referralLinkValue, setReferralLinkValue] = useState<string>("");
     const [saving, setSaving] = useState(false);
     const [dataLoading, setDataLoading] = useState(true);
+    const [refreshingReferrals, setRefreshingReferrals] = useState(false);
 
     // Redirect if not logged in
     useEffect(() => {
@@ -68,47 +69,66 @@ function DashboardContent() {
         }
     }, [user, loading, router]);
 
-    // Load user data
+    // Load user data and set referral link (client-side only to prevent hydration mismatch)
     useEffect(() => {
         if (userData) {
             setPhone(userData.phone || "");
+            if (userData.referralCode) {
+                setReferralLinkValue(`${window.location.origin}?ref=${userData.referralCode}`);
+            }
         }
     }, [userData]);
 
-    // Load orders and referrals
+    // Real-time orders listener - updates immediately when admin changes status
     useEffect(() => {
-        async function loadData() {
-            if (!user) return;
-            setDataLoading(true);
-
-            try {
-                // Load orders
-                const ordersQuery = query(
-                    collection(db, "orders"),
-                    where("userId", "==", user.uid)
-                );
-                const ordersSnap = await getDocs(ordersQuery);
-                setOrders(ordersSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Order[]);
-
-                // Load referrals
-                const referralsQuery = query(
-                    collection(db, "referrals"),
-                    where("referrerId", "==", user.uid)
-                );
-                const referralsSnap = await getDocs(referralsQuery);
-                setReferrals(referralsSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Referral[]);
-            } catch (error) {
-                console.error("Error loading data:", error);
-            }
-
-            setDataLoading(false);
+        if (!user) {
+            setOrders([]);
+            return;
         }
 
-        loadData();
+        setDataLoading(true);
+        const ordersQuery = query(
+            collection(db, "orders"),
+            where("userId", "==", user.uid)
+        );
+
+        const unsubscribe = onSnapshot(ordersQuery, (snapshot) => {
+            setOrders(snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Order[]);
+            setDataLoading(false);
+        }, (error) => {
+            console.error("Error listening to orders:", error);
+            setDataLoading(false);
+        });
+
+        return () => unsubscribe();
     }, [user]);
 
+    // Load referrals (one-time fetch with manual refresh option)
+    const loadReferrals = useCallback(async () => {
+        if (!user) return;
+        setRefreshingReferrals(true);
+
+        try {
+            const referralsQuery = query(
+                collection(db, "referrals"),
+                where("referrerId", "==", user.uid)
+            );
+            const referralsSnap = await getDocs(referralsQuery);
+            setReferrals(referralsSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Referral[]);
+        } catch (error) {
+            console.error("Error loading referrals:", error);
+        }
+
+        setRefreshingReferrals(false);
+    }, [user]);
+
+    useEffect(() => {
+        loadReferrals();
+    }, [loadReferrals]);
+
     const copyReferralLink = () => {
-        const link = `${window.location.origin}?ref=${userData?.referralCode}`;
+        if (!userData?.referralCode) return;
+        const link = `${window.location.origin}?ref=${userData.referralCode}`;
         navigator.clipboard.writeText(link);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -301,7 +321,7 @@ function DashboardContent() {
                                     <input
                                         type="text"
                                         readOnly
-                                        value={`${typeof window !== 'undefined' ? window.location.origin : ''}?ref=${userData?.referralCode || ''}`}
+                                        value={referralLinkValue || 'Loading...'}
                                         className="flex-1 bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm text-green-300"
                                     />
                                     <button

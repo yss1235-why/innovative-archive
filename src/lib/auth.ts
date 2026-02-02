@@ -9,16 +9,12 @@ import {
 } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "./firebase";
+import { generateReferralCode, getUserIdByReferralCode } from "./referral";
 
 const googleProvider = new GoogleAuthProvider();
 
 // Admin email - hardcoded for security
 const ADMIN_EMAIL = "yursccc@gmail.com";
-
-// Generate a unique referral code
-function generateReferralCode(uid: string): string {
-    return uid.substring(0, 8).toUpperCase();
-}
 
 // Sign in with Google
 export async function signInWithGoogle(referralCode?: string) {
@@ -31,6 +27,16 @@ export async function signInWithGoogle(referralCode?: string) {
         const userSnap = await getDoc(userRef);
 
         if (!userSnap.exists()) {
+            // Validate referral code if provided
+            let validReferrerId: string | null = null;
+            if (referralCode) {
+                const referrerId = await getUserIdByReferralCode(referralCode);
+                // Only save if valid and not self-referral
+                if (referrerId && referrerId !== user.uid) {
+                    validReferrerId = referrerId;
+                }
+            }
+
             // New user - create profile
             await setDoc(userRef, {
                 uid: user.uid,
@@ -39,8 +45,8 @@ export async function signInWithGoogle(referralCode?: string) {
                 photoURL: user.photoURL,
                 phone: "",
                 role: user.email === ADMIN_EMAIL ? "admin" : "user",
-                referralCode: generateReferralCode(user.uid),
-                referredBy: referralCode || null,
+                referralCode: generateReferralCode(),
+                referredBy: validReferrerId,
                 createdAt: serverTimestamp(),
             });
         }

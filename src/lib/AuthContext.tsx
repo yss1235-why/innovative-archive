@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from "react";
 import { User } from "firebase/auth";
-import { Timestamp } from "firebase/firestore";
+import { doc, onSnapshot, Timestamp } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { onAuthChange, getUserData } from "@/lib/auth";
 import { trackReferralOnPageLoad, applyReferralToUser, ensureUserHasReferralCode } from "@/lib/referral";
 
@@ -51,14 +52,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [userData, setUserData] = useState<UserData | null>(null);
     const [loading, setLoading] = useState(true);
+    const referralTrackedRef = useRef(false);
 
-    const refreshUserData = async () => {
+    // Use useCallback to prevent stale closure issues
+    const refreshUserData = useCallback(async () => {
         if (user) {
             const data = await getUserData(user.uid);
             setUserData(data as UserData | null);
         }
-    };
+    }, [user]);
 
+    // Auth state listener
     useEffect(() => {
         const unsubscribe = onAuthChange(async (firebaseUser) => {
             setUser(firebaseUser);
@@ -69,12 +73,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
                 // Apply any pending referral from localStorage
                 await applyReferralToUser(firebaseUser.uid);
-
-                // Get user data
-                const data = await getUserData(firebaseUser.uid);
-                setUserData(data as UserData | null);
-            } else {
-                setUserData(null);
             }
 
             setLoading(false);
@@ -83,9 +81,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return () => unsubscribe();
     }, []);
 
-    // Track referral on initial page load
+    // Real-time user data listener - updates immediately when admin changes wallet, etc.
     useEffect(() => {
-        trackReferralOnPageLoad(user?.uid);
+        if (!user) {
+            setUserData(null);
+            return;
+        }
+
+        const userDocRef = doc(db, "users", user.uid);
+        const unsubscribe = onSnapshot(userDocRef, (snapshot) => {
+            if (snapshot.exists()) {
+                setUserData(snapshot.data() as UserData);
+            } else {
+                setUserData(null);
+            }
+        }, (error) => {
+            console.error("Error listening to user data:", error);
+        });
+
+        return () => unsubscribe();
+    }, [user]);
+
+    // Track referral on initial page load only once
+    useEffect(() => {
+        if (!referralTrackedRef.current) {
+            referralTrackedRef.current = true;
+            trackReferralOnPageLoad(user?.uid);
+        }
     }, [user?.uid]);
 
     const isAdmin = userData?.role === "admin";
