@@ -21,7 +21,7 @@ export interface ReferralSettings {
 
 export async function getReferralSettings(): Promise<ReferralSettings> {
     try {
-        const settingsDoc = await getDoc(doc(db, "settings", "referral"));
+        const settingsDoc = await getDoc(doc(db, "settings", "app"));
         if (settingsDoc.exists()) {
             return settingsDoc.data() as ReferralSettings;
         }
@@ -29,12 +29,12 @@ export async function getReferralSettings(): Promise<ReferralSettings> {
         console.error("Error getting referral settings:", error);
     }
 
-    // Default settings
+    // Default settings (aligned with admin defaults)
     return {
-        commissionRate: 0.01, // 1%
-        minWithdrawal: 500,
-        maxWalletUsagePercent: 0.4, // 40%
-        withdrawalCooldownDays: 30,
+        commissionRate: 10,           // 10% matches admin default
+        minWithdrawal: 100,           // ₹100 matches admin default
+        maxWalletUsagePercent: 40,    // 40% matches admin default
+        withdrawalCooldownDays: 7,    // 7 days matches admin default
     };
 }
 

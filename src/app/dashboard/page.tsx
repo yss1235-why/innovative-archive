@@ -11,9 +11,13 @@ import { collection, query, where, getDocs, doc, updateDoc, onSnapshot, getDoc }
 import { db } from "@/lib/firebase";
 import { getWalletData, formatCurrency } from "@/lib/wallet";
 import { createOrder } from "@/lib/orders";
+import { getSortedStates, isInterstate, SELLER_STATE } from "@/lib/state-codes";
+import { calculateGSTFromInclusive, formatCurrency as formatGST } from "@/lib/gst-utils";
+import { createDraftInvoice, type BuyerInfo } from "@/lib/invoice";
 import {
     Package, ShoppingCart, Users, User, Copy, Check,
-    Phone, Save, ExternalLink, Loader2, Wallet, ArrowRight, RefreshCw, Trash2, Minus, Plus
+    Phone, Save, ExternalLink, Loader2, Wallet, ArrowRight, RefreshCw, Trash2, Minus, Plus,
+    MapPin, FileText
 } from "lucide-react";
 
 type TabType = "orders" | "cart" | "referrals" | "profile";
@@ -68,9 +72,22 @@ function DashboardContent() {
     const [checkingOut, setCheckingOut] = useState(false);
     const [orderSuccess, setOrderSuccess] = useState<string | null>(null);
 
-    // Handle checkout - create order, clear cart, open WhatsApp
+    // Buyer info for invoice
+    const [buyerInfo, setBuyerInfo] = useState({
+        name: "",
+        phone: "",
+        address: "",
+        state: "Manipur",
+        gstin: "",
+    });
+
+    // Handle checkout - create order, create invoice, clear cart, open WhatsApp
     const handleCheckout = async () => {
         if (!user || !userData || cartItems.length === 0 || !whatsappNumber) return;
+        if (!buyerInfo.name || !buyerInfo.phone || !buyerInfo.address) {
+            alert("Please fill in your name, phone, and address for the invoice.");
+            return;
+        }
 
         setCheckingOut(true);
         try {
@@ -86,9 +103,36 @@ function DashboardContent() {
                     quantity: item.quantity,
                     category: item.category,
                     imageUrl: item.imageUrl,
+                    gstRate: item.gstRate,
+                    hsnCode: item.hsnCode,
                 })),
                 total: cartTotal,
+                buyer: buyerInfo,
             });
+
+            // Create draft invoice (invoice number generated on shipping)
+            const buyer: BuyerInfo = {
+                name: buyerInfo.name,
+                phone: buyerInfo.phone,
+                address: buyerInfo.address,
+                state: buyerInfo.state,
+                stateCode: "",
+                gstin: buyerInfo.gstin || undefined,
+            };
+
+            await createDraftInvoice(
+                orderId,
+                cartItems.map(item => ({
+                    id: item.id,
+                    name: item.name,
+                    price: item.price,
+                    quantity: item.quantity,
+                    category: item.category,
+                    gstRate: item.gstRate,
+                    hsnCode: item.hsnCode,
+                })),
+                buyer
+            );
 
             // Clear the cart
             clearCart();
@@ -434,9 +478,67 @@ function DashboardContent() {
 
                                     {/* Cart Total */}
                                     <GlassCard className="border-purple-500/20">
-                                        <div className="flex justify-between items-center mb-4">
-                                            <span className="text-lg text-stone-400">Total</span>
-                                            <span className="text-2xl font-light text-purple-400">₹{cartTotal}</span>
+                                        {/* Buyer Info Form */}
+                                        <div className="mb-6">
+                                            <h3 className="text-sm font-medium text-stone-400 mb-3 flex items-center gap-2">
+                                                <FileText className="w-4 h-4" />
+                                                Billing Details (for Invoice)
+                                            </h3>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                <input
+                                                    type="text"
+                                                    placeholder="Full Name *"
+                                                    value={buyerInfo.name}
+                                                    onChange={(e) => setBuyerInfo({ ...buyerInfo, name: e.target.value })}
+                                                    className="bg-stone-900 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-purple-500/50 focus:outline-none"
+                                                />
+                                                <input
+                                                    type="tel"
+                                                    placeholder="Phone *"
+                                                    value={buyerInfo.phone}
+                                                    onChange={(e) => setBuyerInfo({ ...buyerInfo, phone: e.target.value })}
+                                                    className="bg-stone-900 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-purple-500/50 focus:outline-none"
+                                                />
+                                                <input
+                                                    type="text"
+                                                    placeholder="Address *"
+                                                    value={buyerInfo.address}
+                                                    onChange={(e) => setBuyerInfo({ ...buyerInfo, address: e.target.value })}
+                                                    className="bg-stone-900 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-purple-500/50 focus:outline-none md:col-span-2"
+                                                />
+                                                <select
+                                                    value={buyerInfo.state}
+                                                    onChange={(e) => setBuyerInfo({ ...buyerInfo, state: e.target.value })}
+                                                    className="bg-stone-900 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-purple-500/50 focus:outline-none cursor-pointer"
+                                                >
+                                                    {getSortedStates().map((state) => (
+                                                        <option key={state.code} value={state.name}>{state.name}</option>
+                                                    ))}
+                                                </select>
+                                                <input
+                                                    type="text"
+                                                    placeholder="GSTIN (optional for B2B)"
+                                                    value={buyerInfo.gstin}
+                                                    onChange={(e) => setBuyerInfo({ ...buyerInfo, gstin: e.target.value })}
+                                                    className="bg-stone-900 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-purple-500/50 focus:outline-none placeholder:text-stone-600"
+                                                />
+                                            </div>
+                                            {/* Tax type indicator */}
+                                            <p className="text-xs text-stone-500 mt-2 flex items-center gap-1">
+                                                <MapPin className="w-3 h-3" />
+                                                {isInterstate(buyerInfo.state)
+                                                    ? `Interstate (IGST) - Shipping from ${SELLER_STATE.name}`
+                                                    : `Intrastate (CGST + SGST) - Within ${SELLER_STATE.name}`
+                                                }
+                                            </p>
+                                        </div>
+
+                                        <div className="border-t border-white/5 pt-4">
+                                            <div className="flex justify-between items-center mb-4">
+                                                <span className="text-lg text-stone-400">Total</span>
+                                                <span className="text-2xl font-light text-purple-400">₹{cartTotal}</span>
+                                            </div>
+                                            <p className="text-xs text-stone-500 mb-4">* Prices include GST</p>
                                         </div>
 
                                         {orderSuccess ? (

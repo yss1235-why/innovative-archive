@@ -9,11 +9,13 @@ export interface CartItem {
     quantity: number;
     category: string;
     imageUrl?: string;
+    gstRate?: number;   // GST percentage
+    hsnCode?: string;   // HSN/SAC code
 }
 
 interface CartContextType {
     items: CartItem[];
-    addToCart: (product: { id: string; name: string; price: number; category: string; imageUrl?: string }) => void;
+    addToCart: (product: { id: string; name: string; price: number; category: string; imageUrl?: string; gstRate?: number; hsnCode?: string }) => void;
     removeFromCart: (productId: string) => void;
     updateQuantity: (productId: string, quantity: number) => void;
     clearCart: () => void;
@@ -49,7 +51,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         }
     }, [items, isHydrated]);
 
-    const addToCart = (product: { id: string; name: string; price: number; category: string; imageUrl?: string }) => {
+    const addToCart = (product: { id: string; name: string; price: number; category: string; imageUrl?: string; gstRate?: number; hsnCode?: string }) => {
         setItems((prev) => {
             const existing = prev.find((item) => item.id === product.id);
             if (existing) {

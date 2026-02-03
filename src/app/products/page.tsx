@@ -8,26 +8,30 @@ import { useAuth } from "@/lib/AuthContext";
 import { useCart } from "@/lib/CartContext";
 import { collection, query, where, onSnapshot, Query, DocumentData, doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Box, Coffee, Shirt, ShoppingCart, Loader2, Smartphone, Download, Copy, Check } from "lucide-react";
+import { getActiveCategories, getIconComponent, type Category } from "@/lib/categories";
+import { ShoppingCart, Loader2, Download, Copy, Check, Package } from "lucide-react";
 import Link from "next/link";
 
 interface Product {
     id: string;
     name: string;
-    category: "3d-print" | "mug" | "tshirt" | "app";
+    category: string;  // Dynamic from Firestore
     price: number;
+    priceType?: "free" | "subscription";  // For app category
     imageUrl: string;
     description: string;
     downloadUrl?: string;
+    gstRate?: number;   // GST percentage
+    hsnCode?: string;   // HSN/SAC code
 }
 
-const categories = [
-    { id: "all", name: "All Products", icon: null },
-    { id: "3d-print", name: "3D Printing", icon: Box },
-    { id: "mug", name: "Mugs", icon: Coffee },
-    { id: "tshirt", name: "T-Shirts", icon: Shirt },
-    { id: "app", name: "Apps & Platforms", icon: Smartphone },
-];
+// Category display object for UI (constructed from Firestore data)
+interface CategoryDisplay {
+    id: string;
+    name: string;
+    icon: React.ComponentType<{ className?: string }> | null;
+    color: string;
+}
 
 // Wrapper with Suspense
 export default function ProductsPage() {
@@ -47,12 +51,35 @@ function ProductsContent() {
     const initialCategory = searchParams.get("category") || "all";
     const [activeCategory, setActiveCategory] = useState(initialCategory);
     const [products, setProducts] = useState<Product[]>([]);
+    const [categories, setCategories] = useState<CategoryDisplay[]>([{ id: "all", name: "All Products", icon: null, color: "stone" }]);
     const [loading, setLoading] = useState(true);
     const [copiedProductId, setCopiedProductId] = useState<string | null>(null);
     const [addedToCartId, setAddedToCartId] = useState<string | null>(null);
     const [whatsappNumber, setWhatsappNumber] = useState<string>("");
     const { user, userData } = useAuth();
     const { addToCart } = useCart();
+
+    // Fetch categories from Firestore
+    useEffect(() => {
+        const fetchCategories = async () => {
+            try {
+                const firestoreCategories = await getActiveCategories();
+                const categoryDisplays: CategoryDisplay[] = [
+                    { id: "all", name: "All Products", icon: null, color: "stone" },
+                    ...firestoreCategories.map(cat => ({
+                        id: cat.id,
+                        name: cat.name,
+                        icon: getIconComponent(cat.icon),
+                        color: cat.color,
+                    }))
+                ];
+                setCategories(categoryDisplays);
+            } catch (error) {
+                console.error("Error fetching categories:", error);
+            }
+        };
+        fetchCategories();
+    }, []);
 
     // Fetch WhatsApp number from settings
     useEffect(() => {
@@ -95,13 +122,8 @@ function ProductsContent() {
     }, [activeCategory]);
 
     const getCategoryColor = (category: string) => {
-        switch (category) {
-            case "3d-print": return "blue";
-            case "mug": return "orange";
-            case "tshirt": return "purple";
-            case "app": return "cyan";
-            default: return "stone";
-        }
+        const cat = categories.find(c => c.id === category);
+        return cat?.color || "stone";
     };
 
     return (
@@ -160,14 +182,16 @@ function ProductsContent() {
                                                 <img
                                                     src={product.imageUrl}
                                                     alt={product.name}
+                                                    loading="lazy"
                                                     className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                                                 />
                                             ) : (
                                                 <div className="w-full h-full flex items-center justify-center">
-                                                    {product.category === "3d-print" && <Box className="w-12 h-12 text-stone-700" />}
-                                                    {product.category === "mug" && <Coffee className="w-12 h-12 text-stone-700" />}
-                                                    {product.category === "tshirt" && <Shirt className="w-12 h-12 text-stone-700" />}
-                                                    {product.category === "app" && <Smartphone className="w-12 h-12 text-stone-700" />}
+                                                    {(() => {
+                                                        const cat = categories.find(c => c.id === product.category);
+                                                        const IconComponent = cat?.icon || Package;
+                                                        return <IconComponent className="w-12 h-12 text-stone-700" />;
+                                                    })()}
                                                 </div>
                                             )}
                                         </div>
@@ -179,7 +203,11 @@ function ProductsContent() {
                                         <div className="flex items-center justify-between">
                                             {product.category === "app" ? (
                                                 <>
-                                                    <span className="text-sm text-cyan-400 font-medium">Free App</span>
+                                                    <span className="text-sm text-cyan-400 font-medium">
+                                                        {product.priceType === "subscription"
+                                                            ? `₹${product.price}/month`
+                                                            : "Free"}
+                                                    </span>
                                                     {product.downloadUrl && (
                                                         <a
                                                             href={product.downloadUrl}
@@ -203,6 +231,8 @@ function ProductsContent() {
                                                                 price: product.price,
                                                                 category: product.category,
                                                                 imageUrl: product.imageUrl,
+                                                                gstRate: product.gstRate,
+                                                                hsnCode: product.hsnCode,
                                                             });
                                                             setAddedToCartId(product.id);
                                                             setTimeout(() => setAddedToCartId(null), 1500);

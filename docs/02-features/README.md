@@ -33,6 +33,7 @@ Or manually:
 | User Dashboard | 🟢 Complete | - | 2026-02-01 |
 | Admin Dashboard | 🟢 Complete | - | 2026-02-01 |
 | Cart & Checkout | 🟡 In Progress | - | - |
+| Invoice Generator | 🔴 Not Started | - | 2026-02-03 |
 
 ## Feature Descriptions
 

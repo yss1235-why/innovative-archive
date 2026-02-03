@@ -1,24 +1,56 @@
 "use client";
 import { Navbar } from "@/components/ui/Navbar";
+import { useAuth } from "@/lib/AuthContext";
+import { createOrder } from "@/lib/orders";
 import { generateWhatsAppLink, getWhatsAppNumber } from "@/lib/whatsapp";
-import { ArrowLeft, Send, Upload } from "lucide-react";
+import { ArrowLeft, Loader2, Send, Upload } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
 export default function MerchPage() {
+    const { user, userData } = useAuth();
     const [isUploading, setIsUploading] = useState(false);
+    const [isCheckingOut, setIsCheckingOut] = useState(false);
 
     const handleCheckout = async () => {
-        const phone = await getWhatsAppNumber();
-        if (!phone) {
-            alert("WhatsApp number not configured. Please contact support.");
-            return;
+        setIsCheckingOut(true);
+        try {
+            const phone = await getWhatsAppNumber();
+            if (!phone) {
+                alert("WhatsApp number not configured. Please contact support.");
+                return;
+            }
+
+            // If user is logged in, create order in Firestore for referral tracking
+            if (user && userData) {
+                try {
+                    await createOrder({
+                        userId: user.uid,
+                        userEmail: user.email || "",
+                        userName: userData.displayName || userData.email || "Customer",
+                        items: [{
+                            id: "custom-mug",
+                            name: "Custom 3D Mug",
+                            price: 2500, // ₹25.00 in paise or adjust currency
+                            quantity: 1,
+                            category: "mug",
+                        }],
+                        total: 2500,
+                    });
+                } catch (error) {
+                    console.error("Error creating merch order:", error);
+                    // Continue to WhatsApp even if order creation fails
+                }
+            }
+
+            const link = generateWhatsAppLink(phone, {
+                productName: "Custom 3D Mug",
+                description: "User Custom Design (Image incoming)"
+            });
+            window.open(link, '_blank');
+        } finally {
+            setIsCheckingOut(false);
         }
-        const link = generateWhatsAppLink(phone, {
-            productName: "Custom 3D Mug",
-            description: "User Custom Design (Image incoming)"
-        });
-        window.open(link, '_blank');
     };
 
     return (
@@ -77,10 +109,20 @@ export default function MerchPage() {
                     {/* Checkout */}
                     <button
                         onClick={handleCheckout}
-                        className="w-full bg-white text-black py-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(255,255,255,0.2)]"
+                        disabled={isCheckingOut}
+                        className="w-full bg-white text-black py-4 rounded-xl font-medium flex items-center justify-center gap-2 hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(255,255,255,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        <Send className="w-4 h-4" />
-                        Buy on WhatsApp
+                        {isCheckingOut ? (
+                            <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Processing...
+                            </>
+                        ) : (
+                            <>
+                                <Send className="w-4 h-4" />
+                                Buy on WhatsApp
+                            </>
+                        )}
                     </button>
                     <p className="text-xs text-center text-stone-600">
                         You will be redirected to chat with us.

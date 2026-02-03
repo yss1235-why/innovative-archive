@@ -12,10 +12,10 @@ import { ArrowRight, Gift, Sparkles, MapPin, Quote } from "lucide-react";
 
 // Default service card images (can be overridden by admin)
 const DEFAULT_SERVICE_IMAGES = {
-    "3d-print": "/service_3d_printing.png",
-    "mug": "/service_custom_mugs.png",
-    "tshirt": "/service_tshirts.png",
-    "app": "/service_apps.png",
+    "3d-print": "/service_3d_printing.webp",
+    "mug": "/service_custom_mugs.webp",
+    "tshirt": "/service_tshirts.webp",
+    "app": "/service_apps.webp",
 };
 
 interface ServiceImages {

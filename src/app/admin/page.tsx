@@ -13,12 +13,23 @@ import { uploadToCloudinary } from "@/lib/cloudinary";
 import { db } from "@/lib/firebase";
 import { updateOrderStatus as processOrderStatus } from "@/lib/orders";
 import {
+    getCategories,
+    addCategory,
+    updateCategory,
+    deleteCategory,
+    availableIcons,
+    colorOptions,
+    getIconComponent,
+    type Category,
+    type CategoryFormData,
+} from "@/lib/categories";
+import {
     Package, ShoppingBag, Users, Settings, Loader2,
     Check, X, Trash2, Plus, Upload, Save, Phone, Image,
-    Wallet, Banknote, AlertCircle, RefreshCw
+    Wallet, Banknote, AlertCircle, RefreshCw, FolderTree, Edit2
 } from "lucide-react";
 
-type TabType = "orders" | "products" | "referrals" | "withdrawals" | "wallets" | "settings";
+type TabType = "orders" | "products" | "categories" | "referrals" | "withdrawals" | "wallets" | "settings";
 
 interface Order {
     id: string;
@@ -34,11 +45,14 @@ interface Order {
 interface Product {
     id: string;
     name: string;
-    category: "3d-print" | "mug" | "tshirt" | "app";
+    category: string;  // Dynamic from Firestore
     price: number;
+    priceType?: "free" | "subscription";  // For app category
     imageUrl: string;
     description: string;
     downloadUrl?: string;
+    gstRate?: number;   // GST percentage (0, 5, 12, 18)
+    hsnCode?: string;   // HSN/SAC code
 }
 
 interface Referral {
@@ -59,7 +73,7 @@ interface Withdrawal {
     userName?: string;
     amount: number;
     paymentDetails: { fullName: string; phone: string; upiId: string };
-    status: "pending" | "approved" | "rejected";
+    status: "pending" | "paid" | "rejected";
     requestedAt: { seconds: number };
     processedAt?: { seconds: number };
     adminNote?: string;
@@ -75,7 +89,9 @@ interface UserWallet {
 }
 
 interface AppSettings {
+    commissionEnabled: boolean;
     commissionRate: number;
+    maxCommissionPurchases: number;
     whatsappNumber: string;
     minWithdrawal: number;
     withdrawalCooldownDays: number;
@@ -91,16 +107,18 @@ interface AppSettings {
 }
 
 const defaultSettings: AppSettings = {
-    whatsappNumber: "",
+    commissionEnabled: true,
     commissionRate: 10,
+    maxCommissionPurchases: 1,
+    whatsappNumber: "",
     minWithdrawal: 100,
     withdrawalCooldownDays: 7,
     maxWalletUsagePercent: 40,
     serviceImages: {
-        "3d-print": "/service_3d_printing.png",
-        mug: "/service_custom_mugs.png",
-        tshirt: "/service_tshirts.png",
-        app: "/service_apps.png",
+        "3d-print": "/service_3d_printing.webp",
+        mug: "/service_custom_mugs.webp",
+        tshirt: "/service_tshirts.webp",
+        app: "/service_apps.webp",
     },
 };
 
@@ -126,9 +144,12 @@ export default function AdminPage() {
         name: "",
         category: "3d-print" as Product["category"],
         price: "",
+        priceType: "free" as "free" | "subscription",  // For app category
         description: "",
         imageFile: null as File | null,
         downloadUrl: "",
+        gstRate: "18" as string,  // Default GST rate
+        hsnCode: "" as string,    // HSN/SAC code
     });
     const [uploading, setUploading] = useState(false);
 
@@ -138,6 +159,21 @@ export default function AdminPage() {
         amount: "",
         reason: "",
     });
+
+    // Categories state
+    const [categories, setCategories] = useState<Category[]>([]);
+    const [newCategory, setNewCategory] = useState<CategoryFormData>({
+        name: "",
+        icon: "Package",
+        color: "blue",
+    });
+    const [editingCategory, setEditingCategory] = useState<string | null>(null);
+    const [editCategoryData, setEditCategoryData] = useState<CategoryFormData>({
+        name: "",
+        icon: "Package",
+        color: "blue",
+    });
+    const [savingCategory, setSavingCategory] = useState(false);
 
     // Service image uploads
     const [serviceImageFiles, setServiceImageFiles] = useState<{
@@ -254,6 +290,10 @@ export default function AdminPage() {
             if (settingsDoc.exists()) {
                 setSettings(prev => ({ ...prev, ...settingsDoc.data() as AppSettings }));
             }
+
+            // Load categories
+            const categoriesData = await getCategories();
+            setCategories(categoriesData);
         } catch (error) {
             console.error("Error loading data:", error);
         }
@@ -311,17 +351,17 @@ export default function AdminPage() {
                         wallet_balance: Math.max(0, newBalance),
                         wallet_on_hold: Math.max(0, newOnHold),
                     });
-                }
 
-                // Log transaction
-                await addDoc(collection(db, "wallet_transactions"), {
-                    userId: withdrawal.userId,
-                    type: "debit",
-                    amount: withdrawal.amount,
-                    reason: "withdrawal_approved",
-                    withdrawalId: withdrawalId,
-                    createdAt: serverTimestamp(),
-                });
+                    // Log transaction (use transactionLogs collection for consistency)
+                    await addDoc(collection(db, "transactionLogs"), {
+                        userId: withdrawal.userId,
+                        type: "withdrawal_debit",
+                        amount: -withdrawal.amount,
+                        balanceAfter: Math.max(0, newBalance),
+                        description: `Withdrawal to ${withdrawal.paymentDetails?.upiId || "UPI"}`,
+                        createdAt: serverTimestamp(),
+                    });
+                }
             } else {
                 // Reject: release the on_hold amount
                 const userRef = doc(db, "users", withdrawal.userId);
@@ -338,12 +378,12 @@ export default function AdminPage() {
 
             // Update withdrawal status
             await updateDoc(doc(db, "withdrawals", withdrawalId), {
-                status: action === "approve" ? "approved" : "rejected",
+                status: action === "approve" ? "paid" : "rejected",
                 processedAt: serverTimestamp(),
             });
 
             setWithdrawals(withdrawals.map(w =>
-                w.id === withdrawalId ? { ...w, status: action === "approve" ? "approved" : "rejected" } : w
+                w.id === withdrawalId ? { ...w, status: action === "approve" ? "paid" : "rejected" } : w
             ));
         } catch (error) {
             console.error("Error processing withdrawal:", error);
@@ -353,7 +393,8 @@ export default function AdminPage() {
     };
 
     const addProduct = async () => {
-        if (!newProduct.name || !newProduct.price) return;
+        // App category doesn't require price
+        if (!newProduct.name || (newProduct.category !== "app" && !newProduct.price)) return;
         setUploading(true);
 
         try {
@@ -373,10 +414,15 @@ export default function AdminPage() {
             const productData = {
                 name: newProduct.name,
                 category: newProduct.category,
-                price: newProduct.category === "app" ? 0 : (typeof newProduct.price === 'string' ? parseFloat(newProduct.price) || 0 : newProduct.price),
+                price: newProduct.category === "app"
+                    ? (newProduct.priceType === "subscription" ? (typeof newProduct.price === 'string' ? parseFloat(newProduct.price) || 0 : newProduct.price) : 0)
+                    : (typeof newProduct.price === 'string' ? parseFloat(newProduct.price) || 0 : newProduct.price),
+                ...(newProduct.category === "app" ? { priceType: newProduct.priceType } : {}),
                 description: newProduct.description,
                 imageUrl,
                 ...(newProduct.category === "app" && newProduct.downloadUrl ? { downloadUrl: newProduct.downloadUrl } : {}),
+                gstRate: parseInt(newProduct.gstRate) || 18,
+                hsnCode: newProduct.hsnCode || "",
                 createdAt: serverTimestamp(),
             };
 
@@ -385,8 +431,9 @@ export default function AdminPage() {
             // Refresh products list
             await loadOtherData();
 
-            // Reset form
-            setNewProduct({ name: "", category: "3d-print", price: "", description: "", imageFile: null, downloadUrl: "" });
+            // Reset form - use first category from dynamic list or fallback
+            const defaultCategory = categories.length > 0 ? categories[0].id : "3d-print";
+            setNewProduct({ name: "", category: defaultCategory, price: "", priceType: "free", description: "", imageFile: null, downloadUrl: "", gstRate: "18", hsnCode: "" });
         } catch (error) {
             console.error("Error adding product:", error);
         }
@@ -468,6 +515,7 @@ export default function AdminPage() {
     const tabs = [
         { id: "orders", label: "Orders", icon: Package, count: orders.filter(o => o.status !== "completed" && o.status !== "cancelled").length },
         { id: "products", label: "Products", icon: ShoppingBag, count: products.length },
+        { id: "categories", label: "Categories", icon: FolderTree, count: categories.length },
         { id: "referrals", label: "Referrals", icon: Users, count: referrals.filter(r => r.status === "pending").length },
         { id: "withdrawals", label: "Withdrawals", icon: Banknote, count: withdrawals.filter(w => w.status === "pending").length },
         { id: "wallets", label: "User Wallets", icon: Wallet, count: userWallets.length },
@@ -586,13 +634,12 @@ export default function AdminPage() {
                                             />
                                             <select
                                                 value={newProduct.category}
-                                                onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value as Product["category"] })}
+                                                onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
                                                 className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-purple-500/50 focus:outline-none cursor-pointer"
                                             >
-                                                <option value="3d-print">3D Printing</option>
-                                                <option value="mug">Mug</option>
-                                                <option value="tshirt">T-Shirt</option>
-                                                <option value="app">App / Platform</option>
+                                                {categories.map((cat) => (
+                                                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                                ))}
                                             </select>
                                             {newProduct.category !== "app" && (
                                                 <input
@@ -604,14 +651,53 @@ export default function AdminPage() {
                                                 />
                                             )}
                                             {newProduct.category === "app" && (
-                                                <input
-                                                    type="url"
-                                                    placeholder="Download URL (https://...)"
-                                                    value={newProduct.downloadUrl}
-                                                    onChange={(e) => setNewProduct({ ...newProduct, downloadUrl: e.target.value })}
-                                                    className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-cyan-500/50 focus:outline-none placeholder:text-cyan-300/40"
-                                                />
+                                                <>
+                                                    <select
+                                                        value={newProduct.priceType}
+                                                        onChange={(e) => setNewProduct({ ...newProduct, priceType: e.target.value as "free" | "subscription", price: e.target.value === "free" ? "" : newProduct.price })}
+                                                        className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-cyan-500/50 focus:outline-none cursor-pointer"
+                                                    >
+                                                        <option value="free">Free</option>
+                                                        <option value="subscription">Subscription (₹/month)</option>
+                                                    </select>
+                                                    {newProduct.priceType === "subscription" && (
+                                                        <input
+                                                            type="number"
+                                                            placeholder="Monthly Price (₹)"
+                                                            value={newProduct.price || ""}
+                                                            onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
+                                                            className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-cyan-500/50 focus:outline-none"
+                                                        />
+                                                    )}
+                                                    <input
+                                                        type="url"
+                                                        placeholder="Download URL (https://...)"
+                                                        value={newProduct.downloadUrl}
+                                                        onChange={(e) => setNewProduct({ ...newProduct, downloadUrl: e.target.value })}
+                                                        className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-cyan-500/50 focus:outline-none placeholder:text-cyan-300/40"
+                                                    />
+                                                </>
                                             )}
+                                            {/* GST Rate */}
+                                            <select
+                                                value={newProduct.gstRate}
+                                                onChange={(e) => setNewProduct({ ...newProduct, gstRate: e.target.value })}
+                                                className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-green-500/50 focus:outline-none cursor-pointer"
+                                            >
+                                                <option value="0">GST: 0%</option>
+                                                <option value="5">GST: 5%</option>
+                                                <option value="12">GST: 12%</option>
+                                                <option value="18">GST: 18%</option>
+                                                <option value="28">GST: 28%</option>
+                                            </select>
+                                            {/* HSN Code */}
+                                            <input
+                                                type="text"
+                                                placeholder="HSN/SAC Code (optional)"
+                                                value={newProduct.hsnCode}
+                                                onChange={(e) => setNewProduct({ ...newProduct, hsnCode: e.target.value })}
+                                                className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-green-500/50 focus:outline-none placeholder:text-stone-500"
+                                            />
                                             <input
                                                 type="file"
                                                 accept="image/*"
@@ -739,9 +825,9 @@ export default function AdminPage() {
                                             </p>
                                         </GlassCard>
                                         <GlassCard>
-                                            <p className="text-stone-500 text-sm">Approved</p>
+                                            <p className="text-stone-500 text-sm">Paid</p>
                                             <p className="text-2xl font-light text-green-400">
-                                                ₹{withdrawals.filter(w => w.status === "approved").reduce((s, w) => s + w.amount, 0)}
+                                                ₹{withdrawals.filter(w => w.status === "paid").reduce((s, w) => s + w.amount, 0)}
                                             </p>
                                         </GlassCard>
                                         <GlassCard>
@@ -770,7 +856,7 @@ export default function AdminPage() {
                                                                 {w.requestedAt?.seconds ? new Date(w.requestedAt.seconds * 1000).toLocaleString() : 'Unknown'}
                                                             </p>
                                                         </div>
-                                                        <span className={`text-2xl font-light ${w.status === "pending" ? "text-yellow-400" : w.status === "approved" ? "text-green-400" : "text-red-400"}`}>
+                                                        <span className={`text-2xl font-light ${w.status === "pending" ? "text-yellow-400" : w.status === "paid" ? "text-green-400" : "text-red-400"}`}>
                                                             ₹{w.amount}
                                                         </span>
                                                     </div>
@@ -801,8 +887,8 @@ export default function AdminPage() {
                                                             </button>
                                                         </div>
                                                     ) : (
-                                                        <div className={`text-center py-2 rounded-lg text-sm ${w.status === "approved" ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
-                                                            {w.status === "approved" ? "✓ Approved" : "✗ Rejected"}
+                                                        <div className={`text-center py-2 rounded-lg text-sm ${w.status === "paid" ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
+                                                            {w.status === "paid" ? "✓ Paid" : "✗ Rejected"}
                                                         </div>
                                                     )}
 
@@ -867,27 +953,275 @@ export default function AdminPage() {
                                 </div>
                             )}
 
+                            {/* Categories Tab */}
+                            {activeTab === "categories" && (
+                                <div className="space-y-6 max-w-2xl">
+                                    <h2 className="text-xl font-light">Manage Categories</h2>
+
+                                    {/* Add New Category */}
+                                    <GlassCard className="border-purple-500/20">
+                                        <h3 className="text-lg font-light mb-4 flex items-center gap-2">
+                                            <Plus className="w-5 h-5 text-purple-400" />
+                                            Add New Category
+                                        </h3>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                            <div>
+                                                <label className="text-sm text-stone-500 mb-1 block">Name</label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="Category name"
+                                                    value={newCategory.name}
+                                                    onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
+                                                    className="w-full bg-stone-900 border border-white/10 rounded-lg px-4 py-2 focus:border-purple-500/50 focus:outline-none"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-sm text-stone-500 mb-1 block">Icon</label>
+                                                <select
+                                                    value={newCategory.icon}
+                                                    onChange={(e) => setNewCategory({ ...newCategory, icon: e.target.value })}
+                                                    className="w-full bg-stone-900 border border-white/10 rounded-lg px-4 py-2 focus:border-purple-500/50 focus:outline-none cursor-pointer"
+                                                >
+                                                    {availableIcons.map(icon => (
+                                                        <option key={icon} value={icon}>{icon}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-sm text-stone-500 mb-1 block">Color</label>
+                                                <select
+                                                    value={newCategory.color}
+                                                    onChange={(e) => setNewCategory({ ...newCategory, color: e.target.value })}
+                                                    className="w-full bg-stone-900 border border-white/10 rounded-lg px-4 py-2 focus:border-purple-500/50 focus:outline-none cursor-pointer"
+                                                >
+                                                    {colorOptions.map(color => (
+                                                        <option key={color} value={color}>{color}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            onClick={async () => {
+                                                if (!newCategory.name.trim()) return;
+                                                setSavingCategory(true);
+                                                try {
+                                                    await addCategory(newCategory);
+                                                    const updated = await getCategories();
+                                                    setCategories(updated);
+                                                    setNewCategory({ name: "", icon: "Package", color: "blue" });
+                                                } catch (error) {
+                                                    console.error("Error adding category:", error);
+                                                    alert("Failed to add category");
+                                                }
+                                                setSavingCategory(false);
+                                            }}
+                                            disabled={savingCategory || !newCategory.name.trim()}
+                                            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-500 transition-colors disabled:opacity-50 cursor-pointer"
+                                        >
+                                            {savingCategory ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                                            Add Category
+                                        </button>
+                                    </GlassCard>
+
+                                    {/* Category List */}
+                                    <div className="space-y-2">
+                                        {categories.length === 0 ? (
+                                            <GlassCard className="text-center py-8">
+                                                <FolderTree className="w-12 h-12 text-stone-600 mx-auto mb-4" />
+                                                <p className="text-stone-500">No categories yet. Add your first category above!</p>
+                                            </GlassCard>
+                                        ) : (
+                                            categories.map((cat) => {
+                                                const IconComponent = getIconComponent(cat.icon);
+                                                const isEditing = editingCategory === cat.id;
+
+                                                return (
+                                                    <GlassCard key={cat.id} className={`${!cat.active ? "opacity-50" : ""}`}>
+                                                        {isEditing ? (
+                                                            <div className="space-y-3">
+                                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                                    <input
+                                                                        type="text"
+                                                                        value={editCategoryData.name}
+                                                                        onChange={(e) => setEditCategoryData({ ...editCategoryData, name: e.target.value })}
+                                                                        className="bg-stone-900 border border-white/10 rounded-lg px-3 py-2 focus:border-purple-500/50 focus:outline-none"
+                                                                    />
+                                                                    <select
+                                                                        value={editCategoryData.icon}
+                                                                        onChange={(e) => setEditCategoryData({ ...editCategoryData, icon: e.target.value })}
+                                                                        className="bg-stone-900 border border-white/10 rounded-lg px-3 py-2 focus:border-purple-500/50 focus:outline-none cursor-pointer"
+                                                                    >
+                                                                        {availableIcons.map(icon => (
+                                                                            <option key={icon} value={icon}>{icon}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                    <select
+                                                                        value={editCategoryData.color}
+                                                                        onChange={(e) => setEditCategoryData({ ...editCategoryData, color: e.target.value })}
+                                                                        className="bg-stone-900 border border-white/10 rounded-lg px-3 py-2 focus:border-purple-500/50 focus:outline-none cursor-pointer"
+                                                                    >
+                                                                        {colorOptions.map(color => (
+                                                                            <option key={color} value={color}>{color}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                </div>
+                                                                <div className="flex gap-2">
+                                                                    <button
+                                                                        onClick={async () => {
+                                                                            setSavingCategory(true);
+                                                                            try {
+                                                                                await updateCategory(cat.id, editCategoryData);
+                                                                                const updated = await getCategories();
+                                                                                setCategories(updated);
+                                                                                setEditingCategory(null);
+                                                                            } catch (error) {
+                                                                                console.error("Error updating category:", error);
+                                                                                alert("Failed to update category");
+                                                                            }
+                                                                            setSavingCategory(false);
+                                                                        }}
+                                                                        disabled={savingCategory}
+                                                                        className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-500 cursor-pointer"
+                                                                    >
+                                                                        {savingCategory ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                                                                        Save
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => setEditingCategory(null)}
+                                                                        className="flex items-center gap-1 px-3 py-1.5 bg-stone-700 text-white rounded-lg text-sm hover:bg-stone-600 cursor-pointer"
+                                                                    >
+                                                                        <X className="w-3 h-3" />
+                                                                        Cancel
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex items-center justify-between">
+                                                                <div className="flex items-center gap-3">
+                                                                    <div className={`w-10 h-10 rounded-lg bg-${cat.color}-500/20 flex items-center justify-center`}>
+                                                                        <IconComponent className={`w-5 h-5 text-${cat.color}-400`} />
+                                                                    </div>
+                                                                    <div>
+                                                                        <p className="font-medium">{cat.name}</p>
+                                                                        <p className="text-xs text-stone-500">{cat.id} • {cat.icon} • {cat.color}</p>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    {/* Active toggle */}
+                                                                    <button
+                                                                        onClick={async () => {
+                                                                            try {
+                                                                                await updateCategory(cat.id, { active: !cat.active });
+                                                                                const updated = await getCategories();
+                                                                                setCategories(updated);
+                                                                            } catch (error) {
+                                                                                console.error("Error toggling category:", error);
+                                                                            }
+                                                                        }}
+                                                                        className={`px-2 py-1 rounded text-xs cursor-pointer ${cat.active ? "bg-green-500/20 text-green-400" : "bg-stone-700 text-stone-400"}`}
+                                                                    >
+                                                                        {cat.active ? "Active" : "Inactive"}
+                                                                    </button>
+                                                                    {/* Edit */}
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            setEditingCategory(cat.id);
+                                                                            setEditCategoryData({ name: cat.name, icon: cat.icon, color: cat.color });
+                                                                        }}
+                                                                        className="p-2 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500/20 cursor-pointer"
+                                                                    >
+                                                                        <Edit2 className="w-4 h-4" />
+                                                                    </button>
+                                                                    {/* Delete */}
+                                                                    <button
+                                                                        onClick={async () => {
+                                                                            if (!confirm(`Delete category "${cat.name}"? Products in this category will keep their current category value.`)) return;
+                                                                            try {
+                                                                                await deleteCategory(cat.id);
+                                                                                const updated = await getCategories();
+                                                                                setCategories(updated);
+                                                                            } catch (error) {
+                                                                                console.error("Error deleting category:", error);
+                                                                                alert("Failed to delete category");
+                                                                            }
+                                                                        }}
+                                                                        className="p-2 bg-red-500/10 text-red-400 rounded-lg hover:bg-red-500/20 cursor-pointer"
+                                                                    >
+                                                                        <Trash2 className="w-4 h-4" />
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </GlassCard>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Settings Tab */}
                             {activeTab === "settings" && (
                                 <div className="space-y-6 max-w-xl">
                                     <h2 className="text-xl font-light">Settings</h2>
 
-                                    <GlassCard>
-                                        <h3 className="text-lg font-light mb-4">Referral Commission</h3>
-                                        <div className="flex items-center gap-4">
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                max="100"
-                                                value={settings.commissionRate}
-                                                onChange={(e) => setSettings({ ...settings, commissionRate: Number(e.target.value) })}
-                                                className="w-24 bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-center text-lg focus:border-purple-500/50 focus:outline-none"
-                                            />
-                                            <span className="text-stone-400">% of order total</span>
+                                    <GlassCard className="border-green-500/20">
+                                        <h3 className="text-lg font-light mb-4 flex items-center gap-2">
+                                            <Users className="w-5 h-5 text-green-400" />
+                                            Commission Settings
+                                        </h3>
+
+                                        <div className="space-y-6">
+                                            {/* Enable/Disable Toggle */}
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <p className="font-medium">Enable Commission System</p>
+                                                    <p className="text-xs text-stone-500">Turn referral commissions on or off</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => setSettings({ ...settings, commissionEnabled: !settings.commissionEnabled })}
+                                                    className={`relative w-14 h-8 rounded-full transition-colors cursor-pointer ${settings.commissionEnabled ? "bg-green-600" : "bg-stone-700"}`}
+                                                >
+                                                    <div className={`absolute w-6 h-6 bg-white rounded-full top-1 transition-all ${settings.commissionEnabled ? "right-1" : "left-1"}`} />
+                                                </button>
+                                            </div>
+
+                                            {/* Commission Rate */}
+                                            <div className={settings.commissionEnabled ? "" : "opacity-50 pointer-events-none"}>
+                                                <label className="text-sm text-stone-500 mb-1 block">Commission Rate</label>
+                                                <div className="flex items-center gap-4">
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        max="100"
+                                                        value={settings.commissionRate}
+                                                        onChange={(e) => setSettings({ ...settings, commissionRate: Number(e.target.value) })}
+                                                        className="w-24 bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-center text-lg focus:border-green-500/50 focus:outline-none"
+                                                    />
+                                                    <span className="text-stone-400">% of order total</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Max Commission Purchases */}
+                                            <div className={settings.commissionEnabled ? "" : "opacity-50 pointer-events-none"}>
+                                                <label className="text-sm text-stone-500 mb-1 block">Max Commission Purchases</label>
+                                                <div className="flex items-center gap-4">
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        value={settings.maxCommissionPurchases}
+                                                        onChange={(e) => setSettings({ ...settings, maxCommissionPurchases: Number(e.target.value) })}
+                                                        className="w-24 bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-center text-lg focus:border-green-500/50 focus:outline-none"
+                                                    />
+                                                    <span className="text-stone-400">purchases earn commission</span>
+                                                </div>
+                                                <p className="text-xs text-stone-600 mt-2">
+                                                    Set to 0 for unlimited. Set to 1 for first purchase only.
+                                                </p>
+                                            </div>
                                         </div>
-                                        <p className="text-xs text-stone-600 mt-2">
-                                            Referrers earn this percentage when their referred friend makes their first purchase.
-                                        </p>
                                     </GlassCard>
 
                                     <GlassCard>
@@ -1012,7 +1346,7 @@ export default function AdminPage() {
                                                 <label className="text-sm text-blue-300">3D Printing</label>
                                                 <div
                                                     className="aspect-video rounded-lg bg-cover bg-center border border-white/10"
-                                                    style={{ backgroundImage: `url(${settings.serviceImages?.["3d-print"] || "/service_3d_printing.png"})` }}
+                                                    style={{ backgroundImage: `url(${settings.serviceImages?.["3d-print"] || "/service_3d_printing.webp"})` }}
                                                 />
                                                 <input
                                                     id="service-image-3d-print"
@@ -1038,7 +1372,7 @@ export default function AdminPage() {
                                                 <label className="text-sm text-orange-300">Custom Mugs</label>
                                                 <div
                                                     className="aspect-video rounded-lg bg-cover bg-center border border-white/10"
-                                                    style={{ backgroundImage: `url(${settings.serviceImages?.mug || "/service_custom_mugs.png"})` }}
+                                                    style={{ backgroundImage: `url(${settings.serviceImages?.mug || "/service_custom_mugs.webp"})` }}
                                                 />
                                                 <input
                                                     id="service-image-mug"
@@ -1064,7 +1398,7 @@ export default function AdminPage() {
                                                 <label className="text-sm text-purple-300">T-Shirts</label>
                                                 <div
                                                     className="aspect-video rounded-lg bg-cover bg-center border border-white/10"
-                                                    style={{ backgroundImage: `url(${settings.serviceImages?.tshirt || "/service_tshirts.png"})` }}
+                                                    style={{ backgroundImage: `url(${settings.serviceImages?.tshirt || "/service_tshirts.webp"})` }}
                                                 />
                                                 <input
                                                     id="service-image-tshirt"
@@ -1090,7 +1424,7 @@ export default function AdminPage() {
                                                 <label className="text-sm text-cyan-300">Apps & Platforms</label>
                                                 <div
                                                     className="aspect-video rounded-lg bg-cover bg-center border border-white/10"
-                                                    style={{ backgroundImage: `url(${settings.serviceImages?.app || "/service_apps.png"})` }}
+                                                    style={{ backgroundImage: `url(${settings.serviceImages?.app || "/service_apps.webp"})` }}
                                                 />
                                                 <input
                                                     id="service-image-app"

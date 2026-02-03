@@ -45,13 +45,13 @@ export default function WalletPage() {
     const [withdrawError, setWithdrawError] = useState("");
     const [withdrawSuccess, setWithdrawSuccess] = useState(false);
 
-    // Payment details form
     const [paymentDetails, setPaymentDetails] = useState({
         fullName: "",
         phone: "",
         upiId: "",
     });
     const [savingDetails, setSavingDetails] = useState(false);
+    const [settings, setSettings] = useState({ minWithdrawal: 100, maxWalletUsagePercent: 40 });
 
     useEffect(() => {
         if (!loading && !user) {
@@ -62,6 +62,8 @@ export default function WalletPage() {
     useEffect(() => {
         if (user && userData) {
             loadData();
+            // Fetch settings
+            getReferralSettings().then(setSettings);
             // Pre-fill payment details
             if (userData.paymentDetails) {
                 setPaymentDetails({
@@ -253,8 +255,8 @@ export default function WalletPage() {
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
                             className={`flex-1 py-3 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 ${activeTab === tab.id
-                                    ? "bg-stone-800 text-white"
-                                    : "text-stone-500 hover:text-stone-300"
+                                ? "bg-stone-800 text-white"
+                                : "text-stone-500 hover:text-stone-300"
                                 }`}
                         >
                             <tab.icon className="w-4 h-4" />
@@ -271,11 +273,11 @@ export default function WalletPage() {
                             <ul className="space-y-2 text-sm text-stone-400">
                                 <li className="flex items-start gap-2">
                                     <CreditCard className="w-4 h-4 text-cyan-400 mt-0.5" />
-                                    Use up to <span className="text-cyan-400">40%</span> of your cart total at checkout
+                                    Use up to <span className="text-cyan-400">{settings.maxWalletUsagePercent}%</span> of your cart total at checkout
                                 </li>
                                 <li className="flex items-start gap-2">
                                     <Send className="w-4 h-4 text-green-400 mt-0.5" />
-                                    Withdraw minimum <span className="text-green-400">₹500</span> to your UPI
+                                    Withdraw minimum <span className="text-green-400">₹{settings.minWithdrawal}</span> to your UPI
                                 </li>
                                 <li className="flex items-start gap-2">
                                     <Clock className="w-4 h-4 text-yellow-400 mt-0.5" />
@@ -497,8 +499,8 @@ export default function WalletPage() {
                                                 </div>
                                             </div>
                                             <span className={`text-xs px-2 py-1 rounded-full ${wd.status === "paid" ? "bg-green-500/20 text-green-400" :
-                                                    wd.status === "pending" ? "bg-yellow-500/20 text-yellow-400" :
-                                                        "bg-red-500/20 text-red-400"
+                                                wd.status === "pending" ? "bg-yellow-500/20 text-yellow-400" :
+                                                    "bg-red-500/20 text-red-400"
                                                 }`}>
                                                 {wd.status}
                                             </span>
