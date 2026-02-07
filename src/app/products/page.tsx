@@ -18,6 +18,7 @@ interface Product {
     name: string;
     category: string;  // Dynamic from Firestore
     price: number;
+    offerPrice?: number;  // Discounted/sale price
     priceType?: "free" | "subscription";  // For app category
     imageUrl: string;
     description: string;
@@ -224,13 +225,25 @@ function ProductsContent() {
                                                 </>
                                             ) : (
                                                 <>
-                                                    <span className="text-lg font-light">₹{product.price}</span>
+                                                    <div className="flex items-center gap-2">
+                                                        {product.offerPrice && product.offerPrice < product.price ? (
+                                                            <>
+                                                                <span className="text-lg font-medium text-green-400">₹{product.offerPrice}</span>
+                                                                <span className="text-sm text-stone-500 line-through">₹{product.price}</span>
+                                                                <span className="text-xs bg-orange-500/20 text-orange-300 px-1.5 py-0.5 rounded">
+                                                                    {Math.round(((product.price - product.offerPrice) / product.price) * 100)}% OFF
+                                                                </span>
+                                                            </>
+                                                        ) : (
+                                                            <span className="text-lg font-light">₹{product.price}</span>
+                                                        )}
+                                                    </div>
                                                     <button
                                                         onClick={() => {
                                                             addToCart({
                                                                 id: product.id,
                                                                 name: product.name,
-                                                                price: product.price,
+                                                                price: product.offerPrice && product.offerPrice < product.price ? product.offerPrice : product.price,
                                                                 category: product.category,
                                                                 imageUrl: product.imageUrl,
                                                                 gstRate: product.gstRate,

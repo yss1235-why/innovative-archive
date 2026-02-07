@@ -49,6 +49,7 @@ interface Product {
     name: string;
     category: string;  // Dynamic from Firestore
     price: number;
+    offerPrice?: number;  // Discounted/sale price
     priceType?: "free" | "subscription";  // For app category
     imageUrl: string;
     description: string;
@@ -164,6 +165,7 @@ export default function AdminPage() {
         name: "",
         category: "3d-print" as Product["category"],
         price: "",
+        offerPrice: "" as string,  // Discounted/sale price
         priceType: "free" as "free" | "subscription",  // For app category
         description: "",
         imageFile: null as File | null,
@@ -444,6 +446,7 @@ export default function AdminPage() {
                 price: newProduct.category === "app"
                     ? (newProduct.priceType === "subscription" ? (typeof newProduct.price === 'string' ? parseFloat(newProduct.price) || 0 : newProduct.price) : 0)
                     : (typeof newProduct.price === 'string' ? parseFloat(newProduct.price) || 0 : newProduct.price),
+                ...(newProduct.offerPrice ? { offerPrice: parseFloat(newProduct.offerPrice) || 0 } : {}),
                 ...(newProduct.category === "app" ? { priceType: newProduct.priceType } : {}),
                 description: newProduct.description,
                 imageUrl,
@@ -460,7 +463,7 @@ export default function AdminPage() {
 
             // Reset form - use first category from dynamic list or fallback
             const defaultCategory = categories.length > 0 ? categories[0].id : "3d-print";
-            setNewProduct({ name: "", category: defaultCategory, price: "", priceType: "free", description: "", imageFile: null, downloadUrl: "", gstRate: "18", hsnCode: "" });
+            setNewProduct({ name: "", category: defaultCategory, price: "", offerPrice: "", priceType: "free", description: "", imageFile: null, downloadUrl: "", gstRate: "18", hsnCode: "" });
         } catch (error) {
             console.error("Error adding product:", error);
         }
@@ -685,13 +688,22 @@ export default function AdminPage() {
                                                 ))}
                                             </select>
                                             {newProduct.category !== "app" && (
-                                                <input
-                                                    type="number"
-                                                    placeholder="Price (₹)"
-                                                    value={newProduct.price || ""}
-                                                    onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
-                                                    className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-purple-500/50 focus:outline-none"
-                                                />
+                                                <>
+                                                    <input
+                                                        type="number"
+                                                        placeholder="Price (₹)"
+                                                        value={newProduct.price || ""}
+                                                        onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
+                                                        className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-purple-500/50 focus:outline-none"
+                                                    />
+                                                    <input
+                                                        type="number"
+                                                        placeholder="Offer Price (₹) - Optional"
+                                                        value={newProduct.offerPrice || ""}
+                                                        onChange={(e) => setNewProduct({ ...newProduct, offerPrice: e.target.value })}
+                                                        className="bg-stone-900 border border-orange-500/30 rounded-lg px-4 py-2 text-sm focus:border-orange-500/50 focus:outline-none placeholder:text-orange-300/40"
+                                                    />
+                                                </>
                                             )}
                                             {newProduct.category === "app" && (
                                                 <>
@@ -788,7 +800,19 @@ export default function AdminPage() {
 
                                                 <h4 className="font-medium">{product.name}</h4>
                                                 <p className="text-sm text-stone-500">{product.category}</p>
-                                                <p className="text-lg mt-1">₹{product.price}</p>
+                                                <div className="mt-1 flex items-center gap-2">
+                                                    {product.offerPrice && product.offerPrice < product.price ? (
+                                                        <>
+                                                            <span className="text-lg font-medium text-green-400">₹{product.offerPrice}</span>
+                                                            <span className="text-sm text-stone-500 line-through">₹{product.price}</span>
+                                                            <span className="text-xs bg-orange-500/20 text-orange-300 px-1.5 py-0.5 rounded">
+                                                                {Math.round(((product.price - product.offerPrice) / product.price) * 100)}% OFF
+                                                            </span>
+                                                        </>
+                                                    ) : (
+                                                        <span className="text-lg">₹{product.price}</span>
+                                                    )}
+                                                </div>
                                             </GlassCard>
                                         ))}
                                     </div>
