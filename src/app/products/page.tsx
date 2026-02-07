@@ -206,11 +206,23 @@ function ProductsContent() {
                                         <div className="flex items-center justify-between">
                                             {product.category === "app" ? (
                                                 <>
-                                                    <span className="text-sm text-cyan-400 font-medium">
-                                                        {product.priceType === "subscription"
-                                                            ? `₹${product.price}/month`
-                                                            : "Free"}
-                                                    </span>
+                                                    <div className="flex items-center gap-2">
+                                                        {product.priceType === "subscription" ? (
+                                                            product.offerPrice && product.offerPrice < product.price ? (
+                                                                <>
+                                                                    <span className="text-sm font-medium text-green-400">₹{product.offerPrice}/mo</span>
+                                                                    <span className="text-xs text-stone-500 line-through">₹{product.price}</span>
+                                                                    <span className="text-xs bg-orange-500/20 text-orange-300 px-1.5 py-0.5 rounded">
+                                                                        {Math.round(((product.price - product.offerPrice) / product.price) * 100)}% OFF
+                                                                    </span>
+                                                                </>
+                                                            ) : (
+                                                                <span className="text-sm text-cyan-400 font-medium">₹{product.price}/month</span>
+                                                            )
+                                                        ) : (
+                                                            <span className="text-sm text-cyan-400 font-medium">Free</span>
+                                                        )}
+                                                    </div>
                                                     {product.downloadUrl && (
                                                         <a
                                                             href={product.downloadUrl}

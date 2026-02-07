@@ -716,13 +716,22 @@ export default function AdminPage() {
                                                         <option value="subscription">Subscription (₹/month)</option>
                                                     </select>
                                                     {newProduct.priceType === "subscription" && (
-                                                        <input
-                                                            type="number"
-                                                            placeholder="Monthly Price (₹)"
-                                                            value={newProduct.price || ""}
-                                                            onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
-                                                            className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-cyan-500/50 focus:outline-none"
-                                                        />
+                                                        <>
+                                                            <input
+                                                                type="number"
+                                                                placeholder="Monthly Price (₹)"
+                                                                value={newProduct.price || ""}
+                                                                onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
+                                                                className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-cyan-500/50 focus:outline-none"
+                                                            />
+                                                            <input
+                                                                type="number"
+                                                                placeholder="Offer Price (₹/month) - Optional"
+                                                                value={newProduct.offerPrice || ""}
+                                                                onChange={(e) => setNewProduct({ ...newProduct, offerPrice: e.target.value })}
+                                                                className="bg-stone-900 border border-orange-500/30 rounded-lg px-4 py-2 text-sm focus:border-orange-500/50 focus:outline-none placeholder:text-orange-300/40"
+                                                            />
+                                                        </>
                                                     )}
                                                     <input
                                                         type="url"
