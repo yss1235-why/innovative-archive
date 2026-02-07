@@ -311,7 +311,7 @@ function ProductsContent() {
                                         </div>
 
                                         {/* Referral link option - only show if commission enabled */}
-                                        {settings.commissionEnabled && user && userData?.referralCode && product.category !== "app" && (
+                                        {settings.commissionEnabled && user && userData?.referralCode && (product.category !== "app" || product.priceType === "subscription") && (
                                             <div className="mt-3 pt-3 border-t border-white/5">
                                                 <p className="text-xs text-stone-600 mb-2">Share & Earn:</p>
                                                 <div className="flex items-center gap-2">
