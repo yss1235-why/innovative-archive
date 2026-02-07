@@ -175,6 +175,32 @@ export default function AdminPage() {
     });
     const [uploading, setUploading] = useState(false);
 
+    // Edit product state
+    const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+    const [editProduct, setEditProduct] = useState<{
+        name: string;
+        category: string;
+        price: string;
+        offerPrice: string;
+        priceType: "free" | "subscription";
+        description: string;
+        imageFile: File | null;
+        downloadUrl: string;
+        gstRate: string;
+        hsnCode: string;
+    }>({
+        name: "",
+        category: "",
+        price: "",
+        offerPrice: "",
+        priceType: "free",
+        description: "",
+        imageFile: null,
+        downloadUrl: "",
+        gstRate: "18",
+        hsnCode: "",
+    });
+
     // Wallet adjustment
     const [walletAdjustment, setWalletAdjustment] = useState({
         userId: "",
@@ -479,6 +505,74 @@ export default function AdminPage() {
         } catch (error) {
             console.error("Error deleting product:", error);
         }
+    };
+
+    const startEditProduct = (product: Product) => {
+        setEditingProduct(product);
+        setEditProduct({
+            name: product.name,
+            category: product.category,
+            price: product.price?.toString() || "",
+            offerPrice: product.offerPrice?.toString() || "",
+            priceType: product.priceType || "free",
+            description: product.description || "",
+            imageFile: null,
+            downloadUrl: product.downloadUrl || "",
+            gstRate: product.gstRate?.toString() || "18",
+            hsnCode: product.hsnCode || "",
+        });
+    };
+
+    const updateProduct = async () => {
+        if (!editingProduct) return;
+        setUploading(true);
+
+        try {
+            let imageUrl = editingProduct.imageUrl;
+
+            // Upload new image if provided
+            if (editProduct.imageFile) {
+                const result = await uploadToCloudinary(editProduct.imageFile, "products");
+                if (!result.success) {
+                    alert(result.error || "Failed to upload image");
+                    setUploading(false);
+                    return;
+                }
+                imageUrl = result.url || "";
+            }
+
+            const productData = {
+                name: editProduct.name,
+                category: editProduct.category,
+                price: editProduct.category === "app"
+                    ? (editProduct.priceType === "subscription" ? parseFloat(editProduct.price) || 0 : 0)
+                    : parseFloat(editProduct.price) || 0,
+                ...(editProduct.offerPrice ? { offerPrice: parseFloat(editProduct.offerPrice) || 0 } : { offerPrice: undefined }),
+                ...(editProduct.category === "app" ? { priceType: editProduct.priceType } : {}),
+                description: editProduct.description,
+                imageUrl,
+                ...(editProduct.category === "app" && editProduct.downloadUrl ? { downloadUrl: editProduct.downloadUrl } : {}),
+                gstRate: parseInt(editProduct.gstRate) || 18,
+                hsnCode: editProduct.hsnCode || "",
+            };
+
+            await updateDoc(doc(db, "products", editingProduct.id), productData);
+
+            // Update local state
+            setProducts(products.map(p =>
+                p.id === editingProduct.id
+                    ? { ...p, ...productData }
+                    : p
+            ));
+
+            // Close modal
+            setEditingProduct(null);
+        } catch (error) {
+            console.error("Error updating product:", error);
+            alert("Failed to update product");
+        }
+
+        setUploading(false);
     };
 
     const uploadServiceImage = async (serviceType: "3d-print" | "mug" | "tshirt" | "app") => {
@@ -790,12 +884,20 @@ export default function AdminPage() {
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                         {products.map((product) => (
                                             <GlassCard key={product.id} className="relative">
-                                                <button
-                                                    onClick={() => deleteProduct(product.id)}
-                                                    className="absolute top-3 right-3 p-2 bg-red-500/10 text-red-400 rounded-lg hover:bg-red-500/20 transition-colors cursor-pointer"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
+                                                <div className="absolute top-3 right-3 flex gap-2">
+                                                    <button
+                                                        onClick={() => startEditProduct(product)}
+                                                        className="p-2 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500/20 transition-colors cursor-pointer"
+                                                    >
+                                                        <Edit2 className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => deleteProduct(product.id)}
+                                                        className="p-2 bg-red-500/10 text-red-400 rounded-lg hover:bg-red-500/20 transition-colors cursor-pointer"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
 
                                                 <div className="aspect-video rounded-lg bg-stone-900 mb-3 overflow-hidden">
                                                     {product.imageUrl ? (
@@ -825,6 +927,158 @@ export default function AdminPage() {
                                             </GlassCard>
                                         ))}
                                     </div>
+
+                                    {/* Edit Product Modal */}
+                                    {editingProduct && (
+                                        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                            <GlassCard className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                                                <div className="flex justify-between items-center mb-6">
+                                                    <h3 className="text-xl font-light">Edit Product</h3>
+                                                    <button
+                                                        onClick={() => setEditingProduct(null)}
+                                                        className="p-2 hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
+                                                    >
+                                                        <X className="w-5 h-5" />
+                                                    </button>
+                                                </div>
+
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Product Name"
+                                                        value={editProduct.name}
+                                                        onChange={(e) => setEditProduct({ ...editProduct, name: e.target.value })}
+                                                        className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-purple-500/50 focus:outline-none"
+                                                    />
+                                                    <select
+                                                        value={editProduct.category}
+                                                        onChange={(e) => setEditProduct({ ...editProduct, category: e.target.value })}
+                                                        className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-purple-500/50 focus:outline-none cursor-pointer"
+                                                    >
+                                                        {categories.map(cat => (
+                                                            <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                                        ))}
+                                                    </select>
+
+                                                    {editProduct.category !== "app" && (
+                                                        <>
+                                                            <input
+                                                                type="number"
+                                                                placeholder="Price (₹)"
+                                                                value={editProduct.price}
+                                                                onChange={(e) => setEditProduct({ ...editProduct, price: e.target.value })}
+                                                                className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-purple-500/50 focus:outline-none"
+                                                            />
+                                                            <input
+                                                                type="number"
+                                                                placeholder="Offer Price (₹) - Optional"
+                                                                value={editProduct.offerPrice}
+                                                                onChange={(e) => setEditProduct({ ...editProduct, offerPrice: e.target.value })}
+                                                                className="bg-stone-900 border border-orange-500/30 rounded-lg px-4 py-2 text-sm focus:border-orange-500/50 focus:outline-none placeholder:text-orange-300/40"
+                                                            />
+                                                        </>
+                                                    )}
+
+                                                    {editProduct.category === "app" && (
+                                                        <>
+                                                            <select
+                                                                value={editProduct.priceType}
+                                                                onChange={(e) => setEditProduct({ ...editProduct, priceType: e.target.value as "free" | "subscription", price: e.target.value === "free" ? "" : editProduct.price })}
+                                                                className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-cyan-500/50 focus:outline-none cursor-pointer"
+                                                            >
+                                                                <option value="free">Free</option>
+                                                                <option value="subscription">Subscription (₹/month)</option>
+                                                            </select>
+                                                            {editProduct.priceType === "subscription" && (
+                                                                <>
+                                                                    <input
+                                                                        type="number"
+                                                                        placeholder="Monthly Price (₹)"
+                                                                        value={editProduct.price}
+                                                                        onChange={(e) => setEditProduct({ ...editProduct, price: e.target.value })}
+                                                                        className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-cyan-500/50 focus:outline-none"
+                                                                    />
+                                                                    <input
+                                                                        type="number"
+                                                                        placeholder="Offer Price (₹/month) - Optional"
+                                                                        value={editProduct.offerPrice}
+                                                                        onChange={(e) => setEditProduct({ ...editProduct, offerPrice: e.target.value })}
+                                                                        className="bg-stone-900 border border-orange-500/30 rounded-lg px-4 py-2 text-sm focus:border-orange-500/50 focus:outline-none placeholder:text-orange-300/40"
+                                                                    />
+                                                                </>
+                                                            )}
+                                                            <input
+                                                                type="url"
+                                                                placeholder="Download URL (https://...)"
+                                                                value={editProduct.downloadUrl}
+                                                                onChange={(e) => setEditProduct({ ...editProduct, downloadUrl: e.target.value })}
+                                                                className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-cyan-500/50 focus:outline-none placeholder:text-cyan-300/40 md:col-span-2"
+                                                            />
+                                                        </>
+                                                    )}
+
+                                                    <select
+                                                        value={editProduct.gstRate}
+                                                        onChange={(e) => setEditProduct({ ...editProduct, gstRate: e.target.value })}
+                                                        className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-green-500/50 focus:outline-none cursor-pointer"
+                                                    >
+                                                        <option value="0">GST: 0%</option>
+                                                        <option value="5">GST: 5%</option>
+                                                        <option value="12">GST: 12%</option>
+                                                        <option value="18">GST: 18%</option>
+                                                        <option value="28">GST: 28%</option>
+                                                    </select>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="HSN/SAC Code (optional)"
+                                                        value={editProduct.hsnCode}
+                                                        onChange={(e) => setEditProduct({ ...editProduct, hsnCode: e.target.value })}
+                                                        className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-green-500/50 focus:outline-none placeholder:text-stone-500"
+                                                    />
+
+                                                    {/* Current Image Preview */}
+                                                    {editingProduct.imageUrl && (
+                                                        <div className="md:col-span-2">
+                                                            <p className="text-xs text-stone-500 mb-2">Current Image:</p>
+                                                            <img src={editingProduct.imageUrl} alt="Current" className="h-20 w-auto rounded-lg object-cover" />
+                                                        </div>
+                                                    )}
+
+                                                    <input
+                                                        type="file"
+                                                        accept="image/*"
+                                                        onChange={(e) => setEditProduct({ ...editProduct, imageFile: e.target.files?.[0] || null })}
+                                                        className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm file:mr-4 file:py-1 file:px-2 file:rounded file:border-0 file:bg-purple-500/20 file:text-purple-300 file:cursor-pointer md:col-span-2"
+                                                    />
+
+                                                    <textarea
+                                                        placeholder="Description"
+                                                        value={editProduct.description}
+                                                        onChange={(e) => setEditProduct({ ...editProduct, description: e.target.value })}
+                                                        className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-purple-500/50 focus:outline-none md:col-span-2"
+                                                        rows={3}
+                                                    />
+                                                </div>
+
+                                                <div className="flex gap-3 mt-6">
+                                                    <button
+                                                        onClick={updateProduct}
+                                                        disabled={uploading || !editProduct.name}
+                                                        className="flex-1 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                                                    >
+                                                        {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                                        {uploading ? "Saving..." : "Save Changes"}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setEditingProduct(null)}
+                                                        className="px-6 py-2 bg-stone-700 text-white rounded-lg hover:bg-stone-600 transition-colors cursor-pointer"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </div>
+                                            </GlassCard>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
