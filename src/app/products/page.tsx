@@ -223,17 +223,48 @@ function ProductsContent() {
                                                             <span className="text-sm text-cyan-400 font-medium">Free</span>
                                                         )}
                                                     </div>
-                                                    {product.downloadUrl && (
-                                                        <a
-                                                            href={product.downloadUrl}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            className="px-4 py-2 rounded-full bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors flex items-center gap-2 text-sm font-medium"
-                                                        >
-                                                            <Download className="w-4 h-4" />
-                                                            Download
-                                                        </a>
-                                                    )}
+                                                    <div className="flex items-center gap-2">
+                                                        {/* Add to Cart for subscription apps */}
+                                                        {product.priceType === "subscription" && (
+                                                            <button
+                                                                onClick={() => {
+                                                                    addToCart({
+                                                                        id: product.id,
+                                                                        name: product.name,
+                                                                        price: product.offerPrice && product.offerPrice < product.price ? product.offerPrice : product.price,
+                                                                        category: product.category,
+                                                                        imageUrl: product.imageUrl,
+                                                                        gstRate: product.gstRate,
+                                                                        hsnCode: product.hsnCode,
+                                                                    });
+                                                                    setAddedToCartId(product.id);
+                                                                    setTimeout(() => setAddedToCartId(null), 1500);
+                                                                }}
+                                                                className={`p-2 rounded-full transition-all cursor-pointer ${addedToCartId === product.id
+                                                                    ? "bg-green-500/20 text-green-400"
+                                                                    : "bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20"
+                                                                    }`}
+                                                            >
+                                                                {addedToCartId === product.id ? (
+                                                                    <Check className="w-4 h-4" />
+                                                                ) : (
+                                                                    <ShoppingCart className="w-4 h-4" />
+                                                                )}
+                                                            </button>
+                                                        )}
+                                                        {/* Download button for apps with download URL */}
+                                                        {product.downloadUrl && (
+                                                            <a
+                                                                href={product.downloadUrl}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="p-2 rounded-full bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors"
+                                                                title="Download"
+                                                            >
+                                                                <Download className="w-4 h-4" />
+                                                            </a>
+                                                        )}
+                                                    </div>
                                                 </>
                                             ) : (
                                                 <>
