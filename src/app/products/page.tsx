@@ -9,6 +9,7 @@ import { useCart } from "@/lib/CartContext";
 import { collection, query, where, onSnapshot, Query, DocumentData, doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { getActiveCategories, getIconComponent, type Category } from "@/lib/categories";
+import { useSettings } from "@/lib/SettingsContext";
 import { ShoppingCart, Loader2, Download, Copy, Check, Package } from "lucide-react";
 import Link from "next/link";
 
@@ -58,6 +59,7 @@ function ProductsContent() {
     const [whatsappNumber, setWhatsappNumber] = useState<string>("");
     const { user, userData } = useAuth();
     const { addToCart } = useCart();
+    const { settings } = useSettings();
 
     // Fetch categories from Firestore
     useEffect(() => {
@@ -252,8 +254,8 @@ function ProductsContent() {
                                             )}
                                         </div>
 
-                                        {/* Referral link option */}
-                                        {user && userData?.referralCode && product.category !== "app" && (
+                                        {/* Referral link option - only show if commission enabled */}
+                                        {settings.commissionEnabled && user && userData?.referralCode && product.category !== "app" && (
                                             <div className="mt-3 pt-3 border-t border-white/5">
                                                 <p className="text-xs text-stone-600 mb-2">Share & Earn:</p>
                                                 <div className="flex items-center gap-2">

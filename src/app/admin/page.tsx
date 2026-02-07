@@ -12,6 +12,8 @@ import {
 import { uploadToCloudinary } from "@/lib/cloudinary";
 import { db } from "@/lib/firebase";
 import { updateOrderStatus as processOrderStatus } from "@/lib/orders";
+import { getInvoiceByOrderId } from "@/lib/invoice";
+import { downloadInvoicePDF } from "@/lib/pdf-generator";
 import {
     getCategories,
     addCategory,
@@ -26,7 +28,7 @@ import {
 import {
     Package, ShoppingBag, Users, Settings, Loader2,
     Check, X, Trash2, Plus, Upload, Save, Phone, Image,
-    Wallet, Banknote, AlertCircle, RefreshCw, FolderTree, Edit2
+    Wallet, Banknote, AlertCircle, RefreshCw, FolderTree, Edit2, Download
 } from "lucide-react";
 
 type TabType = "orders" | "products" | "categories" | "referrals" | "withdrawals" | "wallets" | "settings";
@@ -138,6 +140,24 @@ export default function AdminPage() {
     const [refreshingProducts, setRefreshingProducts] = useState(false);
     const [processingWithdrawal, setProcessingWithdrawal] = useState<string | null>(null);
     const [uploadingService, setUploadingService] = useState<string | null>(null);
+    const [downloadingInvoice, setDownloadingInvoice] = useState<string | null>(null);
+
+    // Handle invoice download for admin
+    const handleDownloadInvoice = async (orderId: string) => {
+        setDownloadingInvoice(orderId);
+        try {
+            const invoice = await getInvoiceByOrderId(orderId);
+            if (invoice) {
+                downloadInvoicePDF(invoice);
+            } else {
+                alert("Invoice not found. Invoice is generated when order is shipped or completed.");
+            }
+        } catch (error) {
+            alert("Failed to download invoice. Please try again.");
+        } finally {
+            setDownloadingInvoice(null);
+        }
+    };
 
     // New product form
     const [newProduct, setNewProduct] = useState({
@@ -162,18 +182,25 @@ export default function AdminPage() {
 
     // Categories state
     const [categories, setCategories] = useState<Category[]>([]);
-    const [newCategory, setNewCategory] = useState<CategoryFormData>({
+    const [newCategory, setNewCategory] = useState<CategoryFormData & { imageFile?: File | null }>({
         name: "",
         icon: "Package",
         color: "blue",
+        description: "",
+        displayOnHome: true,
+        imageFile: null,
     });
     const [editingCategory, setEditingCategory] = useState<string | null>(null);
-    const [editCategoryData, setEditCategoryData] = useState<CategoryFormData>({
+    const [editCategoryData, setEditCategoryData] = useState<CategoryFormData & { imageFile?: File | null }>({
         name: "",
         icon: "Package",
         color: "blue",
+        description: "",
+        displayOnHome: true,
+        imageFile: null,
     });
     const [savingCategory, setSavingCategory] = useState(false);
+    const [uploadingCategoryImage, setUploadingCategoryImage] = useState(false);
 
     // Service image uploads
     const [serviceImageFiles, setServiceImageFiles] = useState<{
@@ -604,9 +631,25 @@ export default function AdminPage() {
                                                     ))}
                                                 </div>
 
-                                                <div className="border-t border-white/5 pt-3 flex justify-between">
-                                                    <span className="text-stone-500">Total</span>
-                                                    <span className="font-medium text-lg">₹{order.total}</span>
+                                                <div className="border-t border-white/5 pt-3 flex justify-between items-center">
+                                                    <div>
+                                                        <span className="text-stone-500">Total</span>
+                                                        <span className="font-medium text-lg ml-2">₹{order.total}</span>
+                                                    </div>
+                                                    {(order.status === "shipped" || order.status === "completed") && (
+                                                        <button
+                                                            onClick={() => handleDownloadInvoice(order.id)}
+                                                            disabled={downloadingInvoice === order.id}
+                                                            className="flex items-center gap-2 px-3 py-1.5 bg-green-500/20 text-green-300 rounded-lg text-sm hover:bg-green-500/30 transition-colors disabled:opacity-50"
+                                                        >
+                                                            {downloadingInvoice === order.id ? (
+                                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                                            ) : (
+                                                                <Download className="w-4 h-4" />
+                                                            )}
+                                                            Invoice
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </GlassCard>
                                         ))
@@ -1002,31 +1045,88 @@ export default function AdminPage() {
                                             </div>
                                         </div>
 
+                                        {/* Description */}
+                                        <div className="mb-4">
+                                            <label className="text-sm text-stone-500 mb-1 block">Description</label>
+                                            <textarea
+                                                placeholder="Short description for home page card"
+                                                value={newCategory.description || ""}
+                                                onChange={(e) => setNewCategory({ ...newCategory, description: e.target.value })}
+                                                className="w-full bg-stone-900 border border-white/10 rounded-lg px-4 py-2 focus:border-purple-500/50 focus:outline-none"
+                                                rows={2}
+                                            />
+                                        </div>
+
+                                        {/* Image Upload */}
+                                        <div className="mb-4">
+                                            <label className="text-sm text-stone-500 mb-1 block">Background Image</label>
+                                            <input
+                                                type="file"
+                                                accept="image/*"
+                                                onChange={(e) => setNewCategory({ ...newCategory, imageFile: e.target.files?.[0] || null })}
+                                                className="w-full bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm file:mr-4 file:py-1 file:px-3 file:rounded file:border-0 file:bg-purple-500/20 file:text-purple-300 file:cursor-pointer"
+                                            />
+                                            <p className="text-xs text-stone-600 mt-1">Optional. Used as card background on home page.</p>
+                                        </div>
+
+                                        {/* Display on Home Toggle */}
+                                        <div className="flex items-center justify-between mb-4 bg-stone-900/50 rounded-lg p-3">
+                                            <div>
+                                                <p className="text-sm font-medium">Display on Home Page</p>
+                                                <p className="text-xs text-stone-500">Show this category as a service card on home</p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setNewCategory({ ...newCategory, displayOnHome: !newCategory.displayOnHome })}
+                                                className={`relative w-12 h-6 rounded-full transition-colors cursor-pointer ${newCategory.displayOnHome ? "bg-green-600" : "bg-stone-700"}`}
+                                            >
+                                                <div className={`absolute w-5 h-5 bg-white rounded-full top-0.5 transition-all ${newCategory.displayOnHome ? "right-0.5" : "left-0.5"}`} />
+                                            </button>
+                                        </div>
+
                                         <button
                                             onClick={async () => {
                                                 if (!newCategory.name.trim()) return;
                                                 setSavingCategory(true);
                                                 try {
-                                                    await addCategory(newCategory);
+                                                    let imageUrl = "";
+
+                                                    // Upload image if provided
+                                                    if (newCategory.imageFile) {
+                                                        setUploadingCategoryImage(true);
+                                                        const result = await uploadToCloudinary(newCategory.imageFile, "categories");
+                                                        if (result.success) {
+                                                            imageUrl = result.url || "";
+                                                        }
+                                                        setUploadingCategoryImage(false);
+                                                    }
+
+                                                    await addCategory({
+                                                        name: newCategory.name,
+                                                        icon: newCategory.icon,
+                                                        color: newCategory.color,
+                                                        description: newCategory.description,
+                                                        displayOnHome: newCategory.displayOnHome,
+                                                        imageUrl,
+                                                    });
                                                     const updated = await getCategories();
                                                     setCategories(updated);
-                                                    setNewCategory({ name: "", icon: "Package", color: "blue" });
+                                                    setNewCategory({ name: "", icon: "Package", color: "blue", description: "", displayOnHome: true, imageFile: null });
                                                 } catch (error) {
                                                     console.error("Error adding category:", error);
                                                     alert("Failed to add category");
                                                 }
                                                 setSavingCategory(false);
                                             }}
-                                            disabled={savingCategory || !newCategory.name.trim()}
+                                            disabled={savingCategory || uploadingCategoryImage || !newCategory.name.trim()}
                                             className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-500 transition-colors disabled:opacity-50 cursor-pointer"
                                         >
-                                            {savingCategory ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                                            Add Category
+                                            {(savingCategory || uploadingCategoryImage) ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                                            {uploadingCategoryImage ? "Uploading Image..." : savingCategory ? "Adding..." : "Add Category"}
                                         </button>
                                     </GlassCard>
 
-                                    {/* Category List */}
-                                    <div className="space-y-2">
+                                    <div className="space-y-3">
                                         {categories.length === 0 ? (
                                             <GlassCard className="text-center py-8">
                                                 <FolderTree className="w-12 h-12 text-stone-600 mx-auto mb-4" />
@@ -1040,13 +1140,15 @@ export default function AdminPage() {
                                                 return (
                                                     <GlassCard key={cat.id} className={`${!cat.active ? "opacity-50" : ""}`}>
                                                         {isEditing ? (
-                                                            <div className="space-y-3">
+                                                            <div className="space-y-4">
+                                                                {/* Edit Form Row 1: Name, Icon, Color */}
                                                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                                                     <input
                                                                         type="text"
                                                                         value={editCategoryData.name}
                                                                         onChange={(e) => setEditCategoryData({ ...editCategoryData, name: e.target.value })}
                                                                         className="bg-stone-900 border border-white/10 rounded-lg px-3 py-2 focus:border-purple-500/50 focus:outline-none"
+                                                                        placeholder="Name"
                                                                     />
                                                                     <select
                                                                         value={editCategoryData.icon}
@@ -1067,12 +1169,70 @@ export default function AdminPage() {
                                                                         ))}
                                                                     </select>
                                                                 </div>
+
+                                                                {/* Description */}
+                                                                <textarea
+                                                                    value={editCategoryData.description || ""}
+                                                                    onChange={(e) => setEditCategoryData({ ...editCategoryData, description: e.target.value })}
+                                                                    className="w-full bg-stone-900 border border-white/10 rounded-lg px-3 py-2 focus:border-purple-500/50 focus:outline-none"
+                                                                    placeholder="Description"
+                                                                    rows={2}
+                                                                />
+
+                                                                {/* Image Upload */}
+                                                                <div className="flex items-center gap-3">
+                                                                    {(editCategoryData.imageUrl || cat.imageUrl) && (
+                                                                        <div
+                                                                            className="w-20 h-12 rounded bg-cover bg-center border border-white/10"
+                                                                            style={{ backgroundImage: `url(${editCategoryData.imageUrl || cat.imageUrl})` }}
+                                                                        />
+                                                                    )}
+                                                                    <input
+                                                                        type="file"
+                                                                        accept="image/*"
+                                                                        onChange={(e) => setEditCategoryData({ ...editCategoryData, imageFile: e.target.files?.[0] || null })}
+                                                                        className="flex-1 bg-stone-900 border border-white/10 rounded-lg px-3 py-1.5 text-sm file:mr-3 file:py-1 file:px-2 file:rounded file:border-0 file:bg-purple-500/20 file:text-purple-300 file:cursor-pointer"
+                                                                    />
+                                                                </div>
+
+                                                                {/* Display on Home Toggle */}
+                                                                <div className="flex items-center justify-between bg-stone-900/50 rounded-lg p-2">
+                                                                    <span className="text-sm">Display on Home Page</span>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setEditCategoryData({ ...editCategoryData, displayOnHome: !editCategoryData.displayOnHome })}
+                                                                        className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer ${editCategoryData.displayOnHome ? "bg-green-600" : "bg-stone-700"}`}
+                                                                    >
+                                                                        <div className={`absolute w-4 h-4 bg-white rounded-full top-0.5 transition-all ${editCategoryData.displayOnHome ? "right-0.5" : "left-0.5"}`} />
+                                                                    </button>
+                                                                </div>
+
+                                                                {/* Action Buttons */}
                                                                 <div className="flex gap-2">
                                                                     <button
                                                                         onClick={async () => {
                                                                             setSavingCategory(true);
                                                                             try {
-                                                                                await updateCategory(cat.id, editCategoryData);
+                                                                                let imageUrl = editCategoryData.imageUrl;
+
+                                                                                // Upload new image if provided
+                                                                                if (editCategoryData.imageFile) {
+                                                                                    setUploadingCategoryImage(true);
+                                                                                    const result = await uploadToCloudinary(editCategoryData.imageFile, "categories");
+                                                                                    if (result.success) {
+                                                                                        imageUrl = result.url || "";
+                                                                                    }
+                                                                                    setUploadingCategoryImage(false);
+                                                                                }
+
+                                                                                await updateCategory(cat.id, {
+                                                                                    name: editCategoryData.name,
+                                                                                    icon: editCategoryData.icon,
+                                                                                    color: editCategoryData.color,
+                                                                                    description: editCategoryData.description,
+                                                                                    displayOnHome: editCategoryData.displayOnHome,
+                                                                                    imageUrl,
+                                                                                });
                                                                                 const updated = await getCategories();
                                                                                 setCategories(updated);
                                                                                 setEditingCategory(null);
@@ -1082,11 +1242,11 @@ export default function AdminPage() {
                                                                             }
                                                                             setSavingCategory(false);
                                                                         }}
-                                                                        disabled={savingCategory}
-                                                                        className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-500 cursor-pointer"
+                                                                        disabled={savingCategory || uploadingCategoryImage}
+                                                                        className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-500 cursor-pointer disabled:opacity-50"
                                                                     >
-                                                                        {savingCategory ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                                                                        Save
+                                                                        {(savingCategory || uploadingCategoryImage) ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                                                                        {uploadingCategoryImage ? "Uploading..." : "Save"}
                                                                     </button>
                                                                     <button
                                                                         onClick={() => setEditingCategory(null)}
@@ -1098,17 +1258,35 @@ export default function AdminPage() {
                                                                 </div>
                                                             </div>
                                                         ) : (
-                                                            <div className="flex items-center justify-between">
-                                                                <div className="flex items-center gap-3">
-                                                                    <div className={`w-10 h-10 rounded-lg bg-${cat.color}-500/20 flex items-center justify-center`}>
-                                                                        <IconComponent className={`w-5 h-5 text-${cat.color}-400`} />
+                                                            <div className="flex items-start gap-4">
+                                                                {/* Image Preview */}
+                                                                {cat.imageUrl ? (
+                                                                    <div
+                                                                        className="w-24 h-16 rounded-lg bg-cover bg-center border border-white/10 flex-shrink-0"
+                                                                        style={{ backgroundImage: `url(${cat.imageUrl})` }}
+                                                                    />
+                                                                ) : (
+                                                                    <div className={`w-12 h-12 rounded-lg bg-${cat.color}-500/20 flex items-center justify-center flex-shrink-0`}>
+                                                                        <IconComponent className={`w-6 h-6 text-${cat.color}-400`} />
                                                                     </div>
-                                                                    <div>
+                                                                )}
+
+                                                                {/* Info */}
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="flex items-center gap-2 mb-1">
                                                                         <p className="font-medium">{cat.name}</p>
-                                                                        <p className="text-xs text-stone-500">{cat.id} • {cat.icon} • {cat.color}</p>
+                                                                        {cat.displayOnHome && (
+                                                                            <span className="text-xs bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">Home</span>
+                                                                        )}
                                                                     </div>
+                                                                    {cat.description && (
+                                                                        <p className="text-sm text-stone-400 mb-1 line-clamp-1">{cat.description}</p>
+                                                                    )}
+                                                                    <p className="text-xs text-stone-500">{cat.id} • {cat.icon} • {cat.color}</p>
                                                                 </div>
-                                                                <div className="flex items-center gap-2">
+
+                                                                {/* Actions */}
+                                                                <div className="flex items-center gap-2 flex-shrink-0">
                                                                     {/* Active toggle */}
                                                                     <button
                                                                         onClick={async () => {
@@ -1128,7 +1306,15 @@ export default function AdminPage() {
                                                                     <button
                                                                         onClick={() => {
                                                                             setEditingCategory(cat.id);
-                                                                            setEditCategoryData({ name: cat.name, icon: cat.icon, color: cat.color });
+                                                                            setEditCategoryData({
+                                                                                name: cat.name,
+                                                                                icon: cat.icon,
+                                                                                color: cat.color,
+                                                                                description: cat.description || "",
+                                                                                displayOnHome: cat.displayOnHome ?? true,
+                                                                                imageUrl: cat.imageUrl || "",
+                                                                                imageFile: null,
+                                                                            });
                                                                         }}
                                                                         className="p-2 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500/20 cursor-pointer"
                                                                     >

@@ -10,14 +10,16 @@ import { useCart } from "@/lib/CartContext";
 import { collection, query, where, getDocs, doc, updateDoc, onSnapshot, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { getWalletData, formatCurrency } from "@/lib/wallet";
+import { useSettings } from "@/lib/SettingsContext";
 import { createOrder } from "@/lib/orders";
 import { getSortedStates, isInterstate, SELLER_STATE } from "@/lib/state-codes";
 import { calculateGSTFromInclusive, formatCurrency as formatGST } from "@/lib/gst-utils";
-import { createDraftInvoice, type BuyerInfo } from "@/lib/invoice";
+import { createDraftInvoice, getInvoiceByOrderId, type BuyerInfo } from "@/lib/invoice";
+import { downloadInvoicePDF } from "@/lib/pdf-generator";
 import {
     Package, ShoppingCart, Users, User, Copy, Check,
     Phone, Save, ExternalLink, Loader2, Wallet, ArrowRight, RefreshCw, Trash2, Minus, Plus,
-    MapPin, FileText
+    MapPin, FileText, Download
 } from "lucide-react";
 
 type TabType = "orders" | "cart" | "referrals" | "profile";
@@ -26,7 +28,7 @@ interface Order {
     id: string;
     items: { name: string; price: number; quantity: number }[];
     total: number;
-    status: "pending" | "processing" | "delivered";
+    status: "pending" | "processing" | "shipped" | "completed" | "delivered" | "cancelled";
     createdAt: { seconds: number };
 }
 
@@ -56,6 +58,7 @@ function DashboardContent() {
     const searchParams = useSearchParams();
     const { user, userData, loading } = useAuth();
     const { items: cartItems, updateQuantity, removeFromCart, total: cartTotal, clearCart } = useCart();
+    const { settings } = useSettings();
 
     const [activeTab, setActiveTab] = useState<TabType>(
         (searchParams.get("tab") as TabType) || "orders"
@@ -80,6 +83,26 @@ function DashboardContent() {
         state: "Manipur",
         gstin: "",
     });
+
+    // Download invoice state
+    const [downloadingInvoice, setDownloadingInvoice] = useState<string | null>(null);
+
+    // Handle invoice download
+    const handleDownloadInvoice = async (orderId: string) => {
+        setDownloadingInvoice(orderId);
+        try {
+            const invoice = await getInvoiceByOrderId(orderId);
+            if (invoice) {
+                downloadInvoicePDF(invoice);
+            } else {
+                alert("Invoice not found. Invoice is generated when order is shipped or completed.");
+            }
+        } catch (error) {
+            alert("Failed to download invoice. Please try again.");
+        } finally {
+            setDownloadingInvoice(null);
+        }
+    };
 
     // Handle checkout - create order, create invoice, clear cart, open WhatsApp
     const handleCheckout = async () => {
@@ -289,7 +312,7 @@ function DashboardContent() {
     const tabs = [
         { id: "orders", label: "Orders", icon: Package },
         { id: "cart", label: "Cart", icon: ShoppingCart },
-        { id: "referrals", label: "Referrals", icon: Users },
+        ...(settings.commissionEnabled ? [{ id: "referrals", label: "Referrals", icon: Users }] : []),
         { id: "profile", label: "Profile", icon: User },
     ];
 
@@ -306,45 +329,49 @@ function DashboardContent() {
 
                     {/* Quick Access Cards */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
-                        {/* Wallet Card */}
-                        <Link href="/dashboard/wallet">
-                            <GlassCard className="hover:border-cyan-500/30 transition-colors cursor-pointer">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center">
-                                            <Wallet className="w-5 h-5 text-cyan-400" />
+                        {/* Wallet Card - only show if commission enabled */}
+                        {settings.commissionEnabled && (
+                            <Link href="/dashboard/wallet">
+                                <GlassCard className="hover:border-cyan-500/30 transition-colors cursor-pointer">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center">
+                                                <Wallet className="w-5 h-5 text-cyan-400" />
+                                            </div>
+                                            <div>
+                                                <p className="text-sm text-stone-500">Wallet Balance</p>
+                                                <p className="text-xl font-semibold text-cyan-400">
+                                                    {formatCurrency(userData?.wallet_balance || 0)}
+                                                </p>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <p className="text-sm text-stone-500">Wallet Balance</p>
-                                            <p className="text-xl font-semibold text-cyan-400">
-                                                {formatCurrency(userData?.wallet_balance || 0)}
-                                            </p>
-                                        </div>
+                                        <ArrowRight className="w-5 h-5 text-stone-600" />
                                     </div>
-                                    <ArrowRight className="w-5 h-5 text-stone-600" />
-                                </div>
-                            </GlassCard>
-                        </Link>
+                                </GlassCard>
+                            </Link>
+                        )}
 
-                        {/* Referrals Card */}
-                        <Link href="/dashboard/referrals">
-                            <GlassCard className="hover:border-green-500/30 transition-colors cursor-pointer">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
-                                            <Users className="w-5 h-5 text-green-400" />
+                        {/* Referrals Card - only show if commission enabled */}
+                        {settings.commissionEnabled && (
+                            <Link href="/dashboard/referrals">
+                                <GlassCard className="hover:border-green-500/30 transition-colors cursor-pointer">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                                                <Users className="w-5 h-5 text-green-400" />
+                                            </div>
+                                            <div>
+                                                <p className="text-sm text-stone-500">Refer & Earn</p>
+                                                <p className="text-sm text-green-400">
+                                                    Share your link →
+                                                </p>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <p className="text-sm text-stone-500">Refer & Earn</p>
-                                            <p className="text-sm text-green-400">
-                                                Share your link →
-                                            </p>
-                                        </div>
+                                        <ArrowRight className="w-5 h-5 text-stone-600" />
                                     </div>
-                                    <ArrowRight className="w-5 h-5 text-stone-600" />
-                                </div>
-                            </GlassCard>
-                        </Link>
+                                </GlassCard>
+                            </Link>
+                        )}
                     </div>
 
                     {/* Tabs */}
@@ -401,9 +428,25 @@ function DashboardContent() {
                                                 </p>
                                             ))}
                                         </div>
-                                        <div className="border-t border-white/5 pt-3 flex justify-between">
-                                            <span className="text-stone-500">Total</span>
-                                            <span className="font-medium">₹{order.total}</span>
+                                        <div className="border-t border-white/5 pt-3 flex justify-between items-center">
+                                            <div>
+                                                <span className="text-stone-500">Total</span>
+                                                <span className="font-medium ml-2">₹{order.total}</span>
+                                            </div>
+                                            {(order.status === "shipped" || order.status === "delivered") && (
+                                                <button
+                                                    onClick={() => handleDownloadInvoice(order.id)}
+                                                    disabled={downloadingInvoice === order.id}
+                                                    className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/20 text-purple-300 rounded-lg text-sm hover:bg-purple-500/30 transition-colors disabled:opacity-50"
+                                                >
+                                                    {downloadingInvoice === order.id ? (
+                                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                                    ) : (
+                                                        <Download className="w-4 h-4" />
+                                                    )}
+                                                    Invoice
+                                                </button>
+                                            )}
                                         </div>
                                     </GlassCard>
                                 ))
@@ -576,7 +619,7 @@ function DashboardContent() {
                         </div>
                     )}
 
-                    {activeTab === "referrals" && (
+                    {activeTab === "referrals" && settings.commissionEnabled && (
                         <div className="space-y-6">
                             <h2 className="text-xl font-light">Refer & Earn</h2>
 

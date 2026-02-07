@@ -16,6 +16,7 @@ import {
     TransactionLog,
     WithdrawalRecord,
 } from "@/lib/wallet";
+import { useSettings } from "@/lib/SettingsContext";
 import {
     Wallet as WalletIcon,
     ArrowLeft,
@@ -33,6 +34,7 @@ import Link from "next/link";
 
 export default function WalletPage() {
     const { user, userData, loading, refreshUserData } = useAuth();
+    const { settings, loading: settingsLoading } = useSettings();
     const router = useRouter();
     const [activeTab, setActiveTab] = useState<"overview" | "withdraw" | "history">("overview");
     const [transactions, setTransactions] = useState<TransactionLog[]>([]);
@@ -51,7 +53,7 @@ export default function WalletPage() {
         upiId: "",
     });
     const [savingDetails, setSavingDetails] = useState(false);
-    const [settings, setSettings] = useState({ minWithdrawal: 100, maxWalletUsagePercent: 40 });
+    const [walletSettings, setWalletSettings] = useState({ minWithdrawal: 100, maxWalletUsagePercent: 40 });
 
     useEffect(() => {
         if (!loading && !user) {
@@ -59,11 +61,18 @@ export default function WalletPage() {
         }
     }, [user, loading, router]);
 
+    // Redirect if commission system is disabled
+    useEffect(() => {
+        if (!settingsLoading && !settings.commissionEnabled) {
+            router.push("/dashboard");
+        }
+    }, [settings.commissionEnabled, settingsLoading, router]);
+
     useEffect(() => {
         if (user && userData) {
             loadData();
             // Fetch settings
-            getReferralSettings().then(setSettings);
+            getReferralSettings().then(setWalletSettings);
             // Pre-fill payment details
             if (userData.paymentDetails) {
                 setPaymentDetails({
@@ -273,11 +282,11 @@ export default function WalletPage() {
                             <ul className="space-y-2 text-sm text-stone-400">
                                 <li className="flex items-start gap-2">
                                     <CreditCard className="w-4 h-4 text-cyan-400 mt-0.5" />
-                                    Use up to <span className="text-cyan-400">{settings.maxWalletUsagePercent}%</span> of your cart total at checkout
+                                    Use up to <span className="text-cyan-400">{walletSettings.maxWalletUsagePercent}%</span> of your cart total at checkout
                                 </li>
                                 <li className="flex items-start gap-2">
                                     <Send className="w-4 h-4 text-green-400 mt-0.5" />
-                                    Withdraw minimum <span className="text-green-400">₹{settings.minWithdrawal}</span> to your UPI
+                                    Withdraw minimum <span className="text-green-400">₹{walletSettings.minWithdrawal}</span> to your UPI
                                 </li>
                                 <li className="flex items-start gap-2">
                                     <Clock className="w-4 h-4 text-yellow-400 mt-0.5" />

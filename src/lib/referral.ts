@@ -88,6 +88,14 @@ export async function applyReferralToUser(userId: string): Promise<boolean> {
     if (!pendingReferral) return false;
 
     try {
+        // Check if commission system is enabled
+        const settingsDoc = await getDoc(doc(db, "settings", "app"));
+        const settings = settingsDoc.exists() ? settingsDoc.data() : {};
+        if (settings.commissionEnabled === false) {
+            clearPendingReferral();
+            return false; // Commission system disabled
+        }
+
         // Check if user already has a referrer
         const userDoc = await getDoc(doc(db, "users", userId));
         if (userDoc.exists() && userDoc.data().referredBy) {

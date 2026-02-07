@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { useRouter } from "next/navigation";
 import { getReferralLink, getReferralStats, ReferralStats } from "@/lib/referral";
+import { useSettings } from "@/lib/SettingsContext";
 import {
     Copy,
     Check,
@@ -18,6 +19,7 @@ import Link from "next/link";
 
 export default function ReferralsPage() {
     const { user, userData, loading } = useAuth();
+    const { settings, loading: settingsLoading } = useSettings();
     const router = useRouter();
     const [stats, setStats] = useState<ReferralStats | null>(null);
     const [copied, setCopied] = useState(false);
@@ -28,6 +30,13 @@ export default function ReferralsPage() {
             router.push("/");
         }
     }, [user, loading, router]);
+
+    // Redirect if commission system is disabled
+    useEffect(() => {
+        if (!settingsLoading && !settings.commissionEnabled) {
+            router.push("/dashboard");
+        }
+    }, [settings.commissionEnabled, settingsLoading, router]);
 
     useEffect(() => {
         if (user) {
@@ -106,8 +115,8 @@ export default function ReferralsPage() {
                         <button
                             onClick={copyToClipboard}
                             className={`px-4 py-3 rounded-lg transition-colors flex items-center gap-2 ${copied
-                                    ? "bg-green-600 text-white"
-                                    : "bg-stone-800 hover:bg-stone-700 text-stone-300"
+                                ? "bg-green-600 text-white"
+                                : "bg-stone-800 hover:bg-stone-700 text-stone-300"
                                 }`}
                         >
                             {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}

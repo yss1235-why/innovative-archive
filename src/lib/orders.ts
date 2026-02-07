@@ -115,7 +115,6 @@ export async function processOrderCompletion(orderId: string): Promise<void> {
 
         // Check if order has a referral code
         if (!order.referralCode) {
-            console.log("No referral code on order, skipping commission");
             return;
         }
 
@@ -126,7 +125,6 @@ export async function processOrderCompletion(orderId: string): Promise<void> {
         // Check if commission system is enabled
         const commissionEnabled = settings.commissionEnabled !== false; // Default true
         if (!commissionEnabled) {
-            console.log("Commission system is disabled, skipping");
             return;
         }
 
@@ -143,7 +141,6 @@ export async function processOrderCompletion(orderId: string): Promise<void> {
         const usersSnap = await getDocs(usersQuery);
 
         if (usersSnap.empty) {
-            console.log("Referrer not found for code:", order.referralCode);
             return;
         }
 
@@ -159,7 +156,6 @@ export async function processOrderCompletion(orderId: string): Promise<void> {
                 : 0;
 
             if (commissionsEarnedCount >= maxCommissionPurchases) {
-                console.log(`User has already earned ${commissionsEarnedCount}/${maxCommissionPurchases} commissions for referrer, skipping`);
                 return;
             }
         }
@@ -214,7 +210,7 @@ export async function processOrderCompletion(orderId: string): Promise<void> {
             createdAt: serverTimestamp(),
         });
 
-        console.log(`Commission of ₹${commissionAmount} credited to referrer ${referrerId}`);
+        // Commission successfully processed
     } catch (error) {
         console.error("Error processing order completion:", error);
         throw error;
@@ -241,7 +237,7 @@ export async function updateOrderStatus(
                 const { finalizeInvoice } = await import("./invoice");
                 const invoiceId = `inv_${orderId}`;
                 await finalizeInvoice(invoiceId);
-                console.log(`Invoice finalized for order ${orderId}`);
+                // Invoice finalized successfully
             } catch (invoiceError) {
                 // Don't fail the status update if invoice finalization fails
                 console.error("Error finalizing invoice:", invoiceError);
