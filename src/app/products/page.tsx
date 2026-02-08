@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Navbar } from "@/components/ui/Navbar";
 import { GlassCard } from "@/components/ui/GlassCard";
+import { ShareButton } from "@/components/ui/ShareButton";
 import { useAuth } from "@/lib/AuthContext";
 import { useCart } from "@/lib/CartContext";
 import { collection, query, where, onSnapshot, Query, DocumentData, doc, getDoc } from "firebase/firestore";
@@ -175,57 +176,121 @@ function ProductsContent() {
                             {products.map((product) => {
                                 const color = getCategoryColor(product.category);
                                 return (
-                                    <GlassCard
-                                        key={product.id}
-                                        className={`group cursor-pointer hover:border-${color}-500/40 transition-all`}
-                                    >
-                                        {/* Product Image */}
-                                        <div className="aspect-square rounded-lg bg-stone-900 mb-4 overflow-hidden">
-                                            {product.imageUrl ? (
-                                                <img
-                                                    src={product.imageUrl}
-                                                    alt={product.name}
-                                                    loading="lazy"
-                                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                                                />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center">
-                                                    {(() => {
-                                                        const cat = categories.find(c => c.id === product.category);
-                                                        const IconComponent = cat?.icon || Package;
-                                                        return <IconComponent className="w-12 h-12 text-stone-700" />;
-                                                    })()}
-                                                </div>
-                                            )}
+                                    <div key={product.id} className="relative group">
+                                        {/* Share Button */}
+                                        <div className="absolute top-3 right-3 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <ShareButton
+                                                productId={product.id}
+                                                productName={product.name}
+                                                variant="card"
+                                            />
                                         </div>
+                                        <Link href={`/products/${product.id}`}>
+                                            <GlassCard
+                                                className={`cursor-pointer hover:border-${color}-500/40 transition-all`}
+                                            >
+                                                {/* Product Image */}
+                                                <div className="aspect-square rounded-lg bg-stone-900 mb-4 overflow-hidden">
+                                                    {product.imageUrl ? (
+                                                        <img
+                                                            src={product.imageUrl}
+                                                            alt={product.name}
+                                                            loading="lazy"
+                                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                                        />
+                                                    ) : (
+                                                        <div className="w-full h-full flex items-center justify-center">
+                                                            {(() => {
+                                                                const cat = categories.find(c => c.id === product.category);
+                                                                const IconComponent = cat?.icon || Package;
+                                                                return <IconComponent className="w-12 h-12 text-stone-700" />;
+                                                            })()}
+                                                        </div>
+                                                    )}
+                                                </div>
 
-                                        {/* Product Info */}
-                                        <h3 className="font-medium mb-1">{product.name}</h3>
-                                        <p className="text-stone-500 text-sm mb-3 line-clamp-2">{product.description}</p>
+                                                {/* Product Info */}
+                                                <h3 className="font-medium mb-1">{product.name}</h3>
+                                                <p className="text-stone-500 text-sm mb-3 line-clamp-2">{product.description}</p>
 
-                                        <div className="flex items-center justify-between">
-                                            {product.category === "app" ? (
-                                                <>
-                                                    <div className="flex items-center gap-2">
-                                                        {product.priceType === "subscription" ? (
-                                                            product.offerPrice && product.offerPrice < product.price ? (
-                                                                <>
-                                                                    <span className="text-sm font-medium text-green-400">₹{product.offerPrice}/mo</span>
-                                                                    <span className="text-xs text-stone-500 line-through">₹{product.price}</span>
-                                                                    <span className="text-xs bg-orange-500/20 text-orange-300 px-1.5 py-0.5 rounded">
-                                                                        {Math.round(((product.price - product.offerPrice) / product.price) * 100)}% OFF
-                                                                    </span>
-                                                                </>
-                                                            ) : (
-                                                                <span className="text-sm text-cyan-400 font-medium">₹{product.price}/month</span>
-                                                            )
-                                                        ) : (
-                                                            <span className="text-sm text-cyan-400 font-medium">Free</span>
-                                                        )}
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        {/* Add to Cart for subscription apps */}
-                                                        {product.priceType === "subscription" && (
+                                                <div className="flex items-center justify-between">
+                                                    {product.category === "app" ? (
+                                                        <>
+                                                            <div className="flex items-center gap-2">
+                                                                {product.priceType === "subscription" ? (
+                                                                    product.offerPrice && product.offerPrice < product.price ? (
+                                                                        <>
+                                                                            <span className="text-sm font-medium text-green-400">₹{product.offerPrice}/mo</span>
+                                                                            <span className="text-xs text-stone-500 line-through">₹{product.price}</span>
+                                                                            <span className="text-xs bg-orange-500/20 text-orange-300 px-1.5 py-0.5 rounded">
+                                                                                {Math.round(((product.price - product.offerPrice) / product.price) * 100)}% OFF
+                                                                            </span>
+                                                                        </>
+                                                                    ) : (
+                                                                        <span className="text-sm text-cyan-400 font-medium">₹{product.price}/month</span>
+                                                                    )
+                                                                ) : (
+                                                                    <span className="text-sm text-cyan-400 font-medium">Free</span>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                {/* Add to Cart for subscription apps */}
+                                                                {product.priceType === "subscription" && (
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            addToCart({
+                                                                                id: product.id,
+                                                                                name: product.name,
+                                                                                price: product.offerPrice && product.offerPrice < product.price ? product.offerPrice : product.price,
+                                                                                category: product.category,
+                                                                                imageUrl: product.imageUrl,
+                                                                                gstRate: product.gstRate,
+                                                                                hsnCode: product.hsnCode,
+                                                                            });
+                                                                            setAddedToCartId(product.id);
+                                                                            setTimeout(() => setAddedToCartId(null), 1500);
+                                                                        }}
+                                                                        className={`p-2 rounded-full transition-all cursor-pointer ${addedToCartId === product.id
+                                                                            ? "bg-green-500/20 text-green-400"
+                                                                            : "bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20"
+                                                                            }`}
+                                                                    >
+                                                                        {addedToCartId === product.id ? (
+                                                                            <Check className="w-4 h-4" />
+                                                                        ) : (
+                                                                            <ShoppingCart className="w-4 h-4" />
+                                                                        )}
+                                                                    </button>
+                                                                )}
+                                                                {/* Download button for apps with download URL */}
+                                                                {product.downloadUrl && (
+                                                                    <a
+                                                                        href={product.downloadUrl}
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        className="p-2 rounded-full bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors"
+                                                                        title="Download"
+                                                                    >
+                                                                        <Download className="w-4 h-4" />
+                                                                    </a>
+                                                                )}
+                                                            </div>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <div className="flex items-center gap-2">
+                                                                {product.offerPrice && product.offerPrice < product.price ? (
+                                                                    <>
+                                                                        <span className="text-lg font-medium text-green-400">₹{product.offerPrice}</span>
+                                                                        <span className="text-sm text-stone-500 line-through">₹{product.price}</span>
+                                                                        <span className="text-xs bg-orange-500/20 text-orange-300 px-1.5 py-0.5 rounded">
+                                                                            {Math.round(((product.price - product.offerPrice) / product.price) * 100)}% OFF
+                                                                        </span>
+                                                                    </>
+                                                                ) : (
+                                                                    <span className="text-lg font-light">₹{product.price}</span>
+                                                                )}
+                                                            </div>
                                                             <button
                                                                 onClick={() => {
                                                                     addToCart({
@@ -242,7 +307,7 @@ function ProductsContent() {
                                                                 }}
                                                                 className={`p-2 rounded-full transition-all cursor-pointer ${addedToCartId === product.id
                                                                     ? "bg-green-500/20 text-green-400"
-                                                                    : "bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20"
+                                                                    : `bg-${color}-500/10 text-${color}-400 hover:bg-${color}-500/20`
                                                                     }`}
                                                             >
                                                                 {addedToCartId === product.id ? (
@@ -251,93 +316,40 @@ function ProductsContent() {
                                                                     <ShoppingCart className="w-4 h-4" />
                                                                 )}
                                                             </button>
-                                                        )}
-                                                        {/* Download button for apps with download URL */}
-                                                        {product.downloadUrl && (
-                                                            <a
-                                                                href={product.downloadUrl}
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
-                                                                className="p-2 rounded-full bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 transition-colors"
-                                                                title="Download"
-                                                            >
-                                                                <Download className="w-4 h-4" />
-                                                            </a>
-                                                        )}
-                                                    </div>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <div className="flex items-center gap-2">
-                                                        {product.offerPrice && product.offerPrice < product.price ? (
-                                                            <>
-                                                                <span className="text-lg font-medium text-green-400">₹{product.offerPrice}</span>
-                                                                <span className="text-sm text-stone-500 line-through">₹{product.price}</span>
-                                                                <span className="text-xs bg-orange-500/20 text-orange-300 px-1.5 py-0.5 rounded">
-                                                                    {Math.round(((product.price - product.offerPrice) / product.price) * 100)}% OFF
-                                                                </span>
-                                                            </>
-                                                        ) : (
-                                                            <span className="text-lg font-light">₹{product.price}</span>
-                                                        )}
-                                                    </div>
-                                                    <button
-                                                        onClick={() => {
-                                                            addToCart({
-                                                                id: product.id,
-                                                                name: product.name,
-                                                                price: product.offerPrice && product.offerPrice < product.price ? product.offerPrice : product.price,
-                                                                category: product.category,
-                                                                imageUrl: product.imageUrl,
-                                                                gstRate: product.gstRate,
-                                                                hsnCode: product.hsnCode,
-                                                            });
-                                                            setAddedToCartId(product.id);
-                                                            setTimeout(() => setAddedToCartId(null), 1500);
-                                                        }}
-                                                        className={`p-2 rounded-full transition-all cursor-pointer ${addedToCartId === product.id
-                                                            ? "bg-green-500/20 text-green-400"
-                                                            : `bg-${color}-500/10 text-${color}-400 hover:bg-${color}-500/20`
-                                                            }`}
-                                                    >
-                                                        {addedToCartId === product.id ? (
-                                                            <Check className="w-4 h-4" />
-                                                        ) : (
-                                                            <ShoppingCart className="w-4 h-4" />
-                                                        )}
-                                                    </button>
-                                                </>
-                                            )}
-                                        </div>
-
-                                        {/* Referral link option - only show if commission enabled */}
-                                        {settings.commissionEnabled && user && userData?.referralCode && (product.category !== "app" || product.priceType === "subscription") && (
-                                            <div className="mt-3 pt-3 border-t border-white/5">
-                                                <p className="text-xs text-stone-600 mb-2">Share & Earn:</p>
-                                                <div className="flex items-center gap-2">
-                                                    <code className="flex-1 text-xs text-green-400/70 bg-stone-900/50 px-2 py-1 rounded truncate">
-                                                        {typeof window !== 'undefined' ? `${window.location.origin}/products?category=${product.category}&ref=${userData.referralCode}` : `?ref=${userData.referralCode}`}
-                                                    </code>
-                                                    <button
-                                                        onClick={() => {
-                                                            const link = `${window.location.origin}/products?category=${product.category}&ref=${userData.referralCode}`;
-                                                            navigator.clipboard.writeText(link);
-                                                            setCopiedProductId(product.id);
-                                                            setTimeout(() => setCopiedProductId(null), 2000);
-                                                        }}
-                                                        className="p-1.5 rounded bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors cursor-pointer flex-shrink-0"
-                                                        title="Copy referral link"
-                                                    >
-                                                        {copiedProductId === product.id ? (
-                                                            <Check className="w-3 h-3" />
-                                                        ) : (
-                                                            <Copy className="w-3 h-3" />
-                                                        )}
-                                                    </button>
+                                                        </>
+                                                    )}
                                                 </div>
-                                            </div>
-                                        )}
-                                    </GlassCard>
+
+                                                {/* Referral link option - only show if commission enabled */}
+                                                {settings.commissionEnabled && user && userData?.referralCode && (product.category !== "app" || product.priceType === "subscription") && (
+                                                    <div className="mt-3 pt-3 border-t border-white/5">
+                                                        <p className="text-xs text-stone-600 mb-2">Share & Earn:</p>
+                                                        <div className="flex items-center gap-2">
+                                                            <code className="flex-1 text-xs text-green-400/70 bg-stone-900/50 px-2 py-1 rounded truncate">
+                                                                {typeof window !== 'undefined' ? `${window.location.origin}/products?category=${product.category}&ref=${userData.referralCode}` : `?ref=${userData.referralCode}`}
+                                                            </code>
+                                                            <button
+                                                                onClick={() => {
+                                                                    const link = `${window.location.origin}/products?category=${product.category}&ref=${userData.referralCode}`;
+                                                                    navigator.clipboard.writeText(link);
+                                                                    setCopiedProductId(product.id);
+                                                                    setTimeout(() => setCopiedProductId(null), 2000);
+                                                                }}
+                                                                className="p-1.5 rounded bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors cursor-pointer flex-shrink-0"
+                                                                title="Copy referral link"
+                                                            >
+                                                                {copiedProductId === product.id ? (
+                                                                    <Check className="w-3 h-3" />
+                                                                ) : (
+                                                                    <Copy className="w-3 h-3" />
+                                                                )}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </GlassCard>
+                                        </Link>
+                                    </div>
                                 );
                             })}
                         </div>

@@ -51,7 +51,8 @@ interface Product {
     price: number;
     offerPrice?: number;  // Discounted/sale price
     priceType?: "free" | "subscription";  // For app category
-    imageUrl: string;
+    imageUrl: string;  // Primary image (backward compatibility)
+    images?: string[];  // Multiple images array
     description: string;
     downloadUrl?: string;
     gstRate?: number;   // GST percentage (0, 5, 12, 18)
@@ -168,7 +169,7 @@ export default function AdminPage() {
         offerPrice: "" as string,  // Discounted/sale price
         priceType: "free" as "free" | "subscription",  // For app category
         description: "",
-        imageFile: null as File | null,
+        imageFiles: [] as File[],  // Multiple image files
         downloadUrl: "",
         gstRate: "18" as string,  // Default GST rate
         hsnCode: "" as string,    // HSN/SAC code
@@ -184,7 +185,8 @@ export default function AdminPage() {
         offerPrice: string;
         priceType: "free" | "subscription";
         description: string;
-        imageFile: File | null;
+        imageFiles: File[];  // New images to add
+        existingImages: string[];  // Existing image URLs
         downloadUrl: string;
         gstRate: string;
         hsnCode: string;
@@ -195,7 +197,8 @@ export default function AdminPage() {
         offerPrice: "",
         priceType: "free",
         description: "",
-        imageFile: null,
+        imageFiles: [],
+        existingImages: [],
         downloadUrl: "",
         gstRate: "18",
         hsnCode: "",
@@ -453,17 +456,19 @@ export default function AdminPage() {
         setUploading(true);
 
         try {
-            let imageUrl = "";
+            const images: string[] = [];
 
-            // Upload image to Cloudinary if provided
-            if (newProduct.imageFile) {
-                const result = await uploadToCloudinary(newProduct.imageFile, "products");
+            // Upload all images to Cloudinary
+            for (const file of newProduct.imageFiles) {
+                const result = await uploadToCloudinary(file, "products");
                 if (!result.success) {
                     alert(result.error || "Failed to upload image");
                     setUploading(false);
                     return;
                 }
-                imageUrl = result.url || "";
+                if (result.url) {
+                    images.push(result.url);
+                }
             }
 
             const productData = {
@@ -475,7 +480,8 @@ export default function AdminPage() {
                 ...(newProduct.offerPrice ? { offerPrice: parseFloat(newProduct.offerPrice) || 0 } : {}),
                 ...(newProduct.category === "app" ? { priceType: newProduct.priceType } : {}),
                 description: newProduct.description,
-                imageUrl,
+                imageUrl: images[0] || "",  // Primary image for backward compatibility
+                images,  // All images array
                 ...(newProduct.category === "app" && newProduct.downloadUrl ? { downloadUrl: newProduct.downloadUrl } : {}),
                 gstRate: parseInt(newProduct.gstRate) || 18,
                 hsnCode: newProduct.hsnCode || "",
@@ -489,7 +495,7 @@ export default function AdminPage() {
 
             // Reset form - use first category from dynamic list or fallback
             const defaultCategory = categories.length > 0 ? categories[0].id : "3d-print";
-            setNewProduct({ name: "", category: defaultCategory, price: "", offerPrice: "", priceType: "free", description: "", imageFile: null, downloadUrl: "", gstRate: "18", hsnCode: "" });
+            setNewProduct({ name: "", category: defaultCategory, price: "", offerPrice: "", priceType: "free", description: "", imageFiles: [], downloadUrl: "", gstRate: "18", hsnCode: "" });
         } catch (error) {
             console.error("Error adding product:", error);
         }
@@ -509,6 +515,10 @@ export default function AdminPage() {
 
     const startEditProduct = (product: Product) => {
         setEditingProduct(product);
+        // Combine images array with legacy imageUrl for existing images
+        const existingImages = product.images?.length
+            ? product.images
+            : (product.imageUrl ? [product.imageUrl] : []);
         setEditProduct({
             name: product.name,
             category: product.category,
@@ -516,7 +526,8 @@ export default function AdminPage() {
             offerPrice: product.offerPrice?.toString() || "",
             priceType: product.priceType || "free",
             description: product.description || "",
-            imageFile: null,
+            imageFiles: [],
+            existingImages,
             downloadUrl: product.downloadUrl || "",
             gstRate: product.gstRate?.toString() || "18",
             hsnCode: product.hsnCode || "",
@@ -528,17 +539,20 @@ export default function AdminPage() {
         setUploading(true);
 
         try {
-            let imageUrl = editingProduct.imageUrl;
+            // Start with existing images
+            const images: string[] = [...editProduct.existingImages];
 
-            // Upload new image if provided
-            if (editProduct.imageFile) {
-                const result = await uploadToCloudinary(editProduct.imageFile, "products");
+            // Upload new images if provided
+            for (const file of editProduct.imageFiles) {
+                const result = await uploadToCloudinary(file, "products");
                 if (!result.success) {
                     alert(result.error || "Failed to upload image");
                     setUploading(false);
                     return;
                 }
-                imageUrl = result.url || "";
+                if (result.url) {
+                    images.push(result.url);
+                }
             }
 
             const productData = {
@@ -550,7 +564,8 @@ export default function AdminPage() {
                 ...(editProduct.offerPrice ? { offerPrice: parseFloat(editProduct.offerPrice) || 0 } : { offerPrice: undefined }),
                 ...(editProduct.category === "app" ? { priceType: editProduct.priceType } : {}),
                 description: editProduct.description,
-                imageUrl,
+                imageUrl: images[0] || "",  // Primary image for backward compatibility
+                images,  // All images array
                 ...(editProduct.category === "app" && editProduct.downloadUrl ? { downloadUrl: editProduct.downloadUrl } : {}),
                 gstRate: parseInt(editProduct.gstRate) || 18,
                 hsnCode: editProduct.hsnCode || "",
@@ -859,9 +874,38 @@ export default function AdminPage() {
                                             <input
                                                 type="file"
                                                 accept="image/*"
-                                                onChange={(e) => setNewProduct({ ...newProduct, imageFile: e.target.files?.[0] || null })}
+                                                multiple
+                                                onChange={(e) => {
+                                                    const files = Array.from(e.target.files || []);
+                                                    setNewProduct({ ...newProduct, imageFiles: [...newProduct.imageFiles, ...files] });
+                                                }}
                                                 className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm file:mr-4 file:py-1 file:px-2 file:rounded file:border-0 file:bg-purple-500/20 file:text-purple-300 file:cursor-pointer"
                                             />
+                                            {/* Image Previews */}
+                                            {newProduct.imageFiles.length > 0 && (
+                                                <div className="md:col-span-2 flex flex-wrap gap-2">
+                                                    {newProduct.imageFiles.map((file, index) => (
+                                                        <div key={index} className="relative w-16 h-16 rounded-lg overflow-hidden bg-stone-800">
+                                                            <img
+                                                                src={URL.createObjectURL(file)}
+                                                                alt={`Preview ${index + 1}`}
+                                                                className="w-full h-full object-cover"
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    const newFiles = newProduct.imageFiles.filter((_, i) => i !== index);
+                                                                    setNewProduct({ ...newProduct, imageFiles: newFiles });
+                                                                }}
+                                                                className="absolute top-0 right-0 p-0.5 bg-red-500 text-white rounded-bl cursor-pointer"
+                                                            >
+                                                                <X className="w-3 h-3" />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                    <p className="text-xs text-stone-500 w-full mt-1">{newProduct.imageFiles.length} image(s) selected</p>
+                                                </div>
+                                            )}
                                             <textarea
                                                 placeholder="Description"
                                                 value={newProduct.description}
@@ -1036,20 +1080,69 @@ export default function AdminPage() {
                                                         className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm focus:border-green-500/50 focus:outline-none placeholder:text-stone-500"
                                                     />
 
-                                                    {/* Current Image Preview */}
-                                                    {editingProduct.imageUrl && (
+                                                    {/* Existing Images Preview */}
+                                                    {editProduct.existingImages.length > 0 && (
                                                         <div className="md:col-span-2">
-                                                            <p className="text-xs text-stone-500 mb-2">Current Image:</p>
-                                                            <img src={editingProduct.imageUrl} alt="Current" className="h-20 w-auto rounded-lg object-cover" />
+                                                            <p className="text-xs text-stone-500 mb-2">Current Images (click to remove):</p>
+                                                            <div className="flex flex-wrap gap-2">
+                                                                {editProduct.existingImages.map((url, index) => (
+                                                                    <div key={index} className="relative w-16 h-16 rounded-lg overflow-hidden bg-stone-800">
+                                                                        <img src={url} alt={`Image ${index + 1}`} className="w-full h-full object-cover" />
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                const newImages = editProduct.existingImages.filter((_, i) => i !== index);
+                                                                                setEditProduct({ ...editProduct, existingImages: newImages });
+                                                                            }}
+                                                                            className="absolute top-0 right-0 p-0.5 bg-red-500 text-white rounded-bl cursor-pointer"
+                                                                        >
+                                                                            <X className="w-3 h-3" />
+                                                                        </button>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
                                                         </div>
                                                     )}
 
+                                                    {/* Add More Images */}
                                                     <input
                                                         type="file"
                                                         accept="image/*"
-                                                        onChange={(e) => setEditProduct({ ...editProduct, imageFile: e.target.files?.[0] || null })}
+                                                        multiple
+                                                        onChange={(e) => {
+                                                            const files = Array.from(e.target.files || []);
+                                                            setEditProduct({ ...editProduct, imageFiles: [...editProduct.imageFiles, ...files] });
+                                                        }}
                                                         className="bg-stone-900 border border-white/10 rounded-lg px-4 py-2 text-sm file:mr-4 file:py-1 file:px-2 file:rounded file:border-0 file:bg-purple-500/20 file:text-purple-300 file:cursor-pointer md:col-span-2"
                                                     />
+
+                                                    {/* New Images Preview */}
+                                                    {editProduct.imageFiles.length > 0 && (
+                                                        <div className="md:col-span-2">
+                                                            <p className="text-xs text-stone-500 mb-2">New images to add:</p>
+                                                            <div className="flex flex-wrap gap-2">
+                                                                {editProduct.imageFiles.map((file, index) => (
+                                                                    <div key={index} className="relative w-16 h-16 rounded-lg overflow-hidden bg-stone-800">
+                                                                        <img
+                                                                            src={URL.createObjectURL(file)}
+                                                                            alt={`New ${index + 1}`}
+                                                                            className="w-full h-full object-cover"
+                                                                        />
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                const newFiles = editProduct.imageFiles.filter((_, i) => i !== index);
+                                                                                setEditProduct({ ...editProduct, imageFiles: newFiles });
+                                                                            }}
+                                                                            className="absolute top-0 right-0 p-0.5 bg-red-500 text-white rounded-bl cursor-pointer"
+                                                                        >
+                                                                            <X className="w-3 h-3" />
+                                                                        </button>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
 
                                                     <textarea
                                                         placeholder="Description"
