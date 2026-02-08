@@ -4,13 +4,13 @@ import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
-    apiKey: "AIzaSyCt15TOBMKmQPXNNhhV7gbzK7i8oMJ23pw",
-    authDomain: "innov-3d72d.firebaseapp.com",
-    projectId: "innov-3d72d",
-    storageBucket: "innov-3d72d.firebasestorage.app",
-    messagingSenderId: "970028921208",
-    appId: "1:970028921208:web:886f3693343d1ddfb9588d",
-    measurementId: "G-XXF5Y6E5VW"
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
 };
 
 // Initialize Firebase (prevent re-initialization in dev)
