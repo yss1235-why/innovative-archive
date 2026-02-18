@@ -9,6 +9,7 @@ import { LoginButton } from "@/components/auth/LoginButton";
 import { db } from "@/lib/firebase";
 import { getCategories, seedDefaultCategories, Category } from "@/lib/categories";
 import Link from "next/link";
+import Image from "next/image";
 import { ArrowRight, Gift, Sparkles, MapPin, Quote } from "lucide-react";
 
 // Color mapping for category hover effects
@@ -113,17 +114,22 @@ export default function Home() {
                                 <div key={i} className="h-72 rounded-2xl bg-stone-900/50 animate-pulse border border-white/5" />
                             ))
                         ) : (
-                            homeCategories.map((cat) => {
+                            homeCategories.map((cat, index) => {
                                 const colors = colorMap[cat.color] || colorMap.purple;
                                 const isApp = cat.id === "app";
 
                                 return (
                                     <Link key={cat.id} href={`/products?category=${cat.id}`} className="group">
                                         <div className={`relative h-72 rounded-2xl overflow-hidden border border-white/10 ${colors.border} ${colors.shadow} transition-all duration-300`}>
-                                            {/* Background Image */}
-                                            <div
-                                                className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-110"
-                                                style={{ backgroundImage: `url(${cat.imageUrl || DEFAULT_IMAGE})` }}
+                                            {/* Background Image — optimized via next/image */}
+                                            <Image
+                                                src={cat.imageUrl || DEFAULT_IMAGE}
+                                                alt={cat.name}
+                                                fill
+                                                sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 25vw"
+                                                className="object-cover transition-transform duration-500 group-hover:scale-110"
+                                                priority={index < 2}
+                                                loading={index < 2 ? "eager" : "lazy"}
                                             />
                                             {/* Gradient Overlay */}
                                             <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
